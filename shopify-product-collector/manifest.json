@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "咩咩采集1.0",
+  "version": "1.0.6",
+  "description": "采集商品信息并生成 Shopify CSV。",
+  "action": {
+    "default_title": "咩咩采集1.0"
+  },
+  "side_panel": {
+    "default_path": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["activeTab", "scripting", "sidePanel", "storage", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

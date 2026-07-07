@@ -1,0 +1,134 @@
+[
+  {
+    "url": "https://www.raworganicwhey.com/collections/raw-organic-whey/products/raw-organic-whey",
+    "httpStatus": 200,
+    "ok": true,
+    "error": "",
+    "pageTitle": "Raw Organic Whey Protein - 12 oz",
+    "source": "shopify-api",
+    "title": "Raw Organic Whey Protein - 12 oz",
+    "price": "29.99",
+    "compareAtPrice": "",
+    "sku": "1S-YYV3-AE98",
+    "vendor": "Raw Organic Whey",
+    "handle": "raw-organic-whey-protein-12-oz",
+    "descriptionLength": 1156,
+    "imageCount": 4,
+    "firstImages": [
+      "https://cdn.shopify.com/s/files/1/1188/6076/products/Raw-Organic-Whey-Protein-12oz.jpg?v=1497811074",
+      "https://cdn.shopify.com/s/files/1/1188/6076/files/12oz-Organic-whey--back-of-bag--updated-nutrition_601bbda4-104a-4111-95a9-9104be75737c.jpg?v=1774474683",
+      "https://www.raworganicwhey.com/cdn/shop/files/12oz-Organic-whey--back-of-bag--updated-nutrition_601bbda4-104a-4111-95a9-9104be75737c.jpg?v=1774474683"
+    ],
+    "validation": {
+      "errors": [],
+      "warnings": []
+    },
+    "consoleErrorCount": 0
+  },
+  {
+    "url": "https://shop.truvani.com/pages/plant-based-protein",
+    "httpStatus": 200,
+    "ok": true,
+    "error": "",
+    "pageTitle": "Truvani Plant Based Protein",
+    "source": "fallback",
+    "title": "Truvani Plant Based Protein",
+    "price": "49.99",
+    "compareAtPrice": "",
+    "sku": "",
+    "vendor": "",
+    "handle": "truvani-plant-based-protein",
+    "descriptionLength": 134,
+    "imageCount": 10,
+    "firstImages": [
+      "https://shop.truvani.com/cdn/shop/files/TikTok-P20-CHOC.jpg?v=6675067276164425961",
+      "https://shop.truvani.com/cdn/shop/files/SCFFB23-Vanilla.png",
+      "https://shop.truvani.com/cdn/shop/files/choc_vanilla_vanilla_chai_model_drink.jpg"
+    ],
+    "validation": {
+      "errors": [],
+      "warnings": []
+    },
+    "consoleErrorCount": 0
+  },
+  {
+    "url": "https://trybloomin.com/products/bloomin-shelajit-gummies-coc",
+    "httpStatus": 200,
+    "ok": true,
+    "error": "",
+    "pageTitle": "Bloomin Shelajit Gummies.",
+    "source": "shopify-api",
+    "title": "Bloomin Shelajit Gummies.",
+    "price": "49.95",
+    "compareAtPrice": "100.00",
+    "sku": "BL-GUM-JAR-60-MB",
+    "vendor": "Bloomin",
+    "handle": "bloomin-shelajit-gummies",
+    "descriptionLength": 94,
+    "imageCount": 10,
+    "firstImages": [
+      "https://trybloomin.com/cdn/shop/files/bloomin-desire-gummies-8682748.jpg?v=1771137192&width=1920",
+      "https://cdn.shopify.com/s/files/1/0939/8075/4222/files/bloomin-desire-gummies-8682748.jpg?v=1771137192",
+      "https://cdn.shopify.com/s/files/1/0939/8075/4222/files/bloomin-desire-gummies-9882952.jpg?v=1771137193"
+    ],
+    "validation": {
+      "errors": [],
+      "warnings": []
+    },
+    "consoleErrorCount": 2
+  },
+  {
+    "url": "https://www.musclemilk.com/powders/genuine-protein/chocolate/4.94lb",
+    "httpStatus": 200,
+    "ok": true,
+    "error": "",
+    "pageTitle": "Genuine Protein Powder Chocolate 4.94 lb | Muscle Milk©",
+    "source": "fallback",
+    "title": "Genuine Protein Powder Chocolate 4.94 lb | Muscle Milk©",
+    "price": "",
+    "compareAtPrice": "",
+    "sku": "",
+    "vendor": "",
+    "handle": "genuine-protein-powder-chocolate-4-94-lb-muscle-milk",
+    "descriptionLength": 73,
+    "imageCount": 10,
+    "firstImages": [
+      "https://www.musclemilk.com/images/powders/genuine-chocolate-79oz-1x.webp",
+      "https://www.musclemilk.com/images/powders/genuine-chocolate-79oz-1x.png",
+      "https://www.musclemilk.com/images/shakes/thumb/protein-chocolate-14oz-1x.webp"
+    ],
+    "validation": {
+      "errors": [],
+      "warnings": [
+        "价格为空，导出将使用 0.00"
+      ]
+    },
+    "consoleErrorCount": 22
+  },
+  {
+    "url": "https://necessaire.com/collections/best-sellers/products/the-body-retinol",
+    "httpStatus": 200,
+    "ok": true,
+    "error": "",
+    "pageTitle": "The Body Retinol | 0.1% Retinol – Nécessaire",
+    "source": "shopify-api",
+    "title": "The Body Retinol | 0.1% Retinol",
+    "price": "65.0",
+    "compareAtPrice": "",
+    "sku": "6850619375729",
+    "vendor": "Nécessaire",
+    "handle": "the-body-retinol-0-1-retinol",
+    "descriptionLength": 1156,
+    "imageCount": 10,
+    "firstImages": [
+      "https://necessaire.com/cdn/shop/files/01_THEBODYRETINOL_PDP_113c7b7d-896a-476f-badf-853afffafa25.jpg?v=1762202217",
+      "https://cdn.shopify.com/s/files/1/0034/8812/0947/files/01_THEBODYRETINOL_PDP_113c7b7d-896a-476f-badf-853afffafa25.jpg?v=1762202217",
+      "https://cdn.shopify.com/s/files/1/0034/8812/0947/files/02_THEBODYRETINOL_PDP_00e9354a-11ee-4a63-aab7-d4d8b4344423.jpg?v=1692475395"
+    ],
+    "validation": {
+      "errors": [],
+      "warnings": []
+    },
+    "consoleErrorCount": 0
+  }
+]
