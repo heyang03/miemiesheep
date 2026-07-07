@@ -61,31 +61,17 @@
       }));
   }
 
-  function getImageDedupKey(url) {
-    return cleanValue(url)
-      .trim()
-      .replace(/^https?:\/\//i, "")
-      .replace(/\?.*$/, "")
-      .toLowerCase();
-  }
-
-  function getVariantImageUrl(variant, images) {
+  function getVariantImageUrl(variant) {
     const rawUrl = cleanValue(variant.variantImageUrl).trim();
 
     if (!rawUrl) {
       return "";
     }
 
-    const imageKeys = new Set(images.map((image) => getImageDedupKey(image.url)));
-
-    if (imageKeys.has(getImageDedupKey(rawUrl))) {
-      return "";
-    }
-
     return rawUrl;
   }
 
-  function normalizeVariants(product, images) {
+  function normalizeVariants(product) {
     const sourceVariants = Array.isArray(product.variants) && product.variants.length
       ? product.variants
       : [{}];
@@ -106,7 +92,7 @@
       option3Value: cleanValue(variant.option3Value),
       price: cleanValue(variant.price || product.price || "0.00"),
       compareAtPrice: cleanValue(variant.compareAtPrice || product.compareAtPrice),
-      variantImageUrl: getVariantImageUrl(variant, images)
+      variantImageUrl: getVariantImageUrl(variant)
     }));
   }
 
@@ -117,7 +103,7 @@
   function productToRows(product) {
     const images = normalizeImages(product.images);
     const firstImage = images[0] || {};
-    const variants = normalizeVariants(product, images);
+    const variants = normalizeVariants(product);
     const handle = cleanValue(product.handle);
     const title = cleanValue(product.title);
     const description = cleanValue(product.description);
@@ -142,7 +128,7 @@
           "Published on online store": isMainRow
             ? cleanValue(product.published || "false")
             : "",
-          Status: isMainRow ? cleanValue(product.status || "draft") : "",
+          Status: isMainRow ? cleanValue(product.status || "active") : "",
           SKU: variant.sku,
           Barcode: variant.barcode,
           "Option1 name": variant.option1Name || "Default Title",

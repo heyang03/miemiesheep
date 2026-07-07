@@ -27,6 +27,13 @@
         <button type="button" class="secondary-button" id="resetAllButton">重置</button>
       </section>
 
+      <section class="collector-settings" aria-label="采集设置">
+        <label class="collector-toggle">
+          <input id="amazonVariantPaginationInput" type="checkbox" />
+          <span>Amazon 完整翻页</span>
+        </label>
+      </section>
+
       <section class="batch-panel collapsible-section" aria-label="多品批量采集">
         <div class="batch-header accordion-header">
           <div>
@@ -118,6 +125,11 @@
             <span id="batchProgressText">等待生成队列</span>
             <progress id="batchProgressBar" max="100" value="0"></progress>
           </div>
+
+          <label class="list-search-control">
+            <span>搜索商品</span>
+            <input id="batchSearchInput" type="search" placeholder="输入标题、URL、Handle、SKU" />
+          </label>
 
           <section class="batch-utility-panel batch-edit-panel" id="batchEditPanel">
             <div class="batch-panel-header">
@@ -415,8 +427,8 @@
             <label>
               <span>商品状态</span>
               <select id="productStatus">
-                <option value="draft">草稿</option>
                 <option value="active">启用</option>
+                <option value="draft">草稿</option>
                 <option value="archived">归档</option>
               </select>
             </label>
@@ -462,6 +474,10 @@
             </h2>
             <div class="variant-toolbar">
               <span id="variantCount">1 个</span>
+              <label class="list-search-control variant-search-control">
+                <span>搜索变体</span>
+                <input id="variantSearchInput" type="search" placeholder="颜色、规格、SKU、价格" />
+              </label>
               <button type="button" class="ghost-button" id="variantSelectAllButton">
                 全选
               </button>
@@ -488,6 +504,22 @@
                 disabled
               >
                 恢复导出
+              </button>
+              <button
+                type="button"
+                class="ghost-button"
+                id="mergeDuplicateVariantsButton"
+                disabled
+              >
+                合并重复
+              </button>
+              <button
+                type="button"
+                class="ghost-button"
+                id="fillVariantSkuButton"
+                disabled
+              >
+                补齐 SKU
               </button>
               <button
                 type="button"

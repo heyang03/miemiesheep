@@ -7,10 +7,11 @@ const addVariantButton = document.getElementById("addVariantButton");
 const clearDraftButton = document.getElementById("clearDraftButton");
 const resetAllButton = document.getElementById("resetAllButton");
 const regenerateHandleButton = document.getElementById("regenerateHandleButton");
+const amazonVariantPaginationInput = document.getElementById("amazonVariantPaginationInput");
 const batchTitleToggle = document.getElementById("batchTitleToggle");
 const batchToggleButton = document.getElementById("batchToggleButton");
 const batchBody = document.getElementById("batchBody");
-const batchHeader = batchTitleToggle.closest(".accordion-header");
+const batchHeader = batchTitleToggle?.closest(".accordion-header");
 const batchSummary = document.getElementById("batchSummary");
 const batchCount = document.getElementById("batchCount");
 const batchUrlInput = document.getElementById("batchUrlInput");
@@ -29,6 +30,7 @@ const clearBatchButton = document.getElementById("clearBatchButton");
 const batchTimeoutInput = document.getElementById("batchTimeoutInput");
 const batchProgressText = document.getElementById("batchProgressText");
 const batchProgressBar = document.getElementById("batchProgressBar");
+const batchSearchInput = document.getElementById("batchSearchInput");
 const batchEditPanel = document.getElementById("batchEditPanel");
 const batchEditSummary = document.getElementById("batchEditSummary");
 const batchVendorInput = document.getElementById("batchVendorInput");
@@ -52,7 +54,7 @@ const pageDomainInput = document.getElementById("pageDomain");
 const siteRuleTitleToggle = document.getElementById("siteRuleTitleToggle");
 const siteRuleToggleButton = document.getElementById("siteRuleToggleButton");
 const siteRuleBody = document.getElementById("siteRuleBody");
-const siteRuleHeader = siteRuleTitleToggle.closest(".accordion-header");
+const siteRuleHeader = siteRuleTitleToggle?.closest(".accordion-header");
 const siteRuleSummary = document.getElementById("siteRuleSummary");
 const siteRuleDomain = document.getElementById("siteRuleDomain");
 const siteRuleTitleSelectorInput = document.getElementById("siteRuleTitleSelector");
@@ -87,6 +89,7 @@ const sourceBadge = document.getElementById("sourceBadge");
 const imageCount = document.getElementById("imageCount");
 const imageSourceInfo = document.getElementById("imageSourceInfo");
 const imageGrid = document.getElementById("imageGrid");
+const imagePanel = imageGrid?.closest(".image-panel");
 const cacheHint = document.getElementById("cacheHint");
 const validationPanel = document.getElementById("validationPanel");
 const validationSummary = document.getElementById("validationSummary");
@@ -94,17 +97,21 @@ const validationList = document.getElementById("validationList");
 const resultTitleToggle = document.getElementById("resultTitleToggle");
 const resultToggleButton = document.getElementById("resultToggleButton");
 const resultBody = document.getElementById("resultBody");
-const resultHeader = resultTitleToggle.closest(".accordion-header");
+const resultHeader = resultTitleToggle?.closest(".accordion-header");
 const variantCount = document.getElementById("variantCount");
 const variantList = document.getElementById("variantList");
+const variantPanel = variantList?.closest(".variant-panel");
 const variantTitleToggle = document.getElementById("variantTitleToggle");
 const variantToggleButton = document.getElementById("variantToggleButton");
 const variantSelectAllButton = document.getElementById("variantSelectAllButton");
 const deleteSelectedVariantsButton = document.getElementById("deleteSelectedVariantsButton");
 const excludeSelectedVariantsButton = document.getElementById("excludeSelectedVariantsButton");
 const includeSelectedVariantsButton = document.getElementById("includeSelectedVariantsButton");
+const mergeDuplicateVariantsButton = document.getElementById("mergeDuplicateVariantsButton");
+const fillVariantSkuButton = document.getElementById("fillVariantSkuButton");
+const variantSearchInput = document.getElementById("variantSearchInput");
 const variantBody = document.getElementById("variantBody");
-const variantHeader = variantTitleToggle.closest(".accordion-header");
+const variantHeader = variantTitleToggle?.closest(".accordion-header");
 const imageTitleToggle = document.getElementById("imageTitleToggle");
 const imageToggleButton = document.getElementById("imageToggleButton");
 const imageSelectAllButton = document.getElementById("imageSelectAllButton");
@@ -118,14 +125,20 @@ const imageReplaceFromInput = document.getElementById("imageReplaceFromInput");
 const imageReplaceToInput = document.getElementById("imageReplaceToInput");
 const replaceImageDomainButton = document.getElementById("replaceImageDomainButton");
 const imageBody = document.getElementById("imageBody");
-const imageHeader = imageTitleToggle.closest(".accordion-header");
+const imageHeader = imageTitleToggle?.closest(".accordion-header");
+
+function addSafeEventListener(target, type, listener, options) {
+  target?.addEventListener?.(type, listener, options);
+}
 
 const BATCH_STORAGE_KEY = "spc:batch-queue:v1";
+const COLLECTOR_SETTINGS_STORAGE_KEY = "spc:collector-settings:v1";
 const SITE_RULE_EXPAND_AFTER_PICK_KEY = "spc:ui:site-rule-expand-after-pick";
 const SITE_RULE_STORAGE_PREFIX = "spc:site-rule:";
 const BATCH_TAB_LOAD_TIMEOUT_MS = 35000;
 const MIN_BATCH_TIMEOUT_SECONDS = 8;
 const MAX_BATCH_TIMEOUT_SECONDS = 90;
+const IMAGE_SCROLL_THRESHOLD = 8;
 const BATCH_PREVIEW_HYDRATE_CONCURRENCY = 3;
 const IMAGE_CHECK_TIMEOUT_MS = 10000;
 const MIN_RECOMMENDED_IMAGE_SIDE = 300;
@@ -149,6 +162,9 @@ let batchItems = [];
 let selectedBatchItemIds = new Set();
 let batchLogs = [];
 let currentSiteRule = null;
+let collectorSettings = {
+  amazonFollowVariantPages: false
+};
 let isBatchCollecting = false;
 let isBatchPreviewHydrating = false;
 let isBatchPrechecking = false;
@@ -157,8 +173,13 @@ let shouldStopBatchCollection = false;
 let draggedImageIndex = null;
 
 function setStatus(message, type = "idle") {
-  statusText.textContent = message;
-  statusDot.dataset.status = type;
+  if (statusText) {
+    statusText.textContent = message;
+  }
+
+  if (statusDot) {
+    statusDot.dataset.status = type;
+  }
 }
 
 function setCollapsibleState(button, body, isExpanded) {
@@ -399,6 +420,93 @@ function getBatchTimeoutSeconds() {
 
 function getBatchTimeoutMs() {
   return getBatchTimeoutSeconds() * 1000;
+}
+
+function normalizeCollectorSettings(settings = {}) {
+  return {
+    amazonFollowVariantPages: Boolean(settings.amazonFollowVariantPages)
+  };
+}
+
+function renderCollectorSettings(settings = collectorSettings) {
+  const normalizedSettings = normalizeCollectorSettings(settings);
+
+  collectorSettings = normalizedSettings;
+  if (amazonVariantPaginationInput) {
+    amazonVariantPaginationInput.checked = normalizedSettings.amazonFollowVariantPages;
+  }
+}
+
+function getCollectorSettingsFromForm() {
+  return normalizeCollectorSettings({
+    amazonFollowVariantPages: Boolean(amazonVariantPaginationInput?.checked)
+  });
+}
+
+async function loadCollectorSettings() {
+  const savedSettings = await chromeStorageGet(COLLECTOR_SETTINGS_STORAGE_KEY);
+
+  renderCollectorSettings(savedSettings || {});
+  return collectorSettings;
+}
+
+async function saveCollectorSettingsFromForm() {
+  collectorSettings = getCollectorSettingsFromForm();
+  renderCollectorSettings(collectorSettings);
+  await chromeStorageSet({
+    [COLLECTOR_SETTINGS_STORAGE_KEY]: collectorSettings
+  });
+  setStatus("采集设置已保存", "success");
+}
+
+function normalizeSearchText(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/^https?:\/\//i, "")
+    .replace(/[?#&=/_.:-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function searchTermMatches(term, text) {
+  if (!term) {
+    return true;
+  }
+
+  if (text.includes(term)) {
+    return true;
+  }
+
+  let termIndex = 0;
+
+  for (const character of text) {
+    if (character === term[termIndex]) {
+      termIndex += 1;
+    }
+
+    if (termIndex >= term.length) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function fuzzySearchMatches(query, values = []) {
+  const terms = normalizeSearchText(query).split(/\s+/).filter(Boolean);
+
+  if (!terms.length) {
+    return true;
+  }
+
+  const haystack = normalizeSearchText(values.filter(Boolean).join(" "));
+
+  if (!haystack) {
+    return false;
+  }
+
+  return terms.every((term) => searchTermMatches(term, haystack));
 }
 
 function loadBatchState() {
@@ -1255,6 +1363,45 @@ function renderBatchLog() {
     });
 }
 
+function getBatchSearchQuery() {
+  return batchSearchInput?.value.trim() || "";
+}
+
+function getBatchSearchValues(item, index = 0) {
+  const product = item.product || {};
+
+  return [
+    item.title,
+    item.url,
+    item.handle,
+    item.source,
+    item.error,
+    getBatchItemStatusLabel(item),
+    `#${index + 1}`,
+    product.title,
+    product.handle,
+    product.vendor,
+    product.sku,
+    product.tags,
+    product.type,
+    product.description
+  ];
+}
+
+function batchItemMatchesSearch(item, index = 0, query = getBatchSearchQuery()) {
+  return fuzzySearchMatches(query, getBatchSearchValues(item, index));
+}
+
+function getVisibleBatchItems() {
+  const query = getBatchSearchQuery();
+
+  if (!query) {
+    return batchItems;
+  }
+
+  return batchItems.filter((item, index) => batchItemMatchesSearch(item, index, query));
+}
+
 function updateBatchControls() {
   const stats = getBatchStats();
   const doneCount = stats.success + stats.error;
@@ -1262,12 +1409,19 @@ function updateBatchControls() {
   const hasCollectable = batchItems.some((item) => item.status !== "success");
   const hasSuccess = batchItems.some((item) => item.status === "success" && item.product);
   const selectedItems = getSelectedBatchItems();
+  const visibleBatchItems = getVisibleBatchItems();
+  const isBatchSearchActive = Boolean(getBatchSearchQuery());
   const hasSelectedSuccess = selectedItems.some(
     (item) => item.status === "success" && item.product
   );
-  const allSelected = stats.total > 0 && selectedItems.length === stats.total;
+  const selectableItems = isBatchSearchActive ? visibleBatchItems : batchItems;
+  const allSelected =
+    selectableItems.length > 0 &&
+    selectableItems.every((item) => selectedBatchItemIds.has(item.id));
 
-  batchCount.textContent = `${stats.total} 个`;
+  batchCount.textContent = isBatchSearchActive
+    ? `${visibleBatchItems.length}/${stats.total} 个`
+    : `${stats.total} 个`;
   batchProgressBar.value = progressValue;
   batchProgressText.textContent = stats.total
     ? `${stats.success}/${stats.total} 成功，${stats.error} 失败，${stats.pending} 待采集`
@@ -1287,8 +1441,12 @@ function updateBatchControls() {
   exportBatchCsvButton.disabled = isBatchCollecting || !hasSuccess;
   exportSelectedBatchCsvButton.disabled = isBatchCollecting || !hasSelectedSuccess;
   retryFailedBatchButton.disabled = isBatchCollecting || !stats.error;
-  selectAllBatchButton.disabled = isBatchCollecting || !stats.total;
-  selectAllBatchButton.textContent = allSelected ? "取消全选" : "全选";
+  selectAllBatchButton.disabled = isBatchCollecting || !selectableItems.length;
+  selectAllBatchButton.textContent = allSelected
+    ? "取消全选"
+    : isBatchSearchActive
+      ? "全选结果"
+      : "全选";
   deleteSelectedBatchButton.disabled = isBatchCollecting || !selectedItems.length;
   fixDuplicateHandlesButton.disabled = isBatchCollecting || !hasDuplicateBatchHandles();
   clearBatchButton.disabled = isBatchCollecting || !stats.total;
@@ -1300,6 +1458,8 @@ function updateBatchControls() {
 function renderBatchQueue() {
   clearElement(batchList);
   pruneSelectedBatchItems();
+  const batchSearchQuery = getBatchSearchQuery();
+  let matchedBatchCount = 0;
 
   if (!batchItems.length) {
     const empty = document.createElement("p");
@@ -1312,6 +1472,7 @@ function renderBatchQueue() {
   }
 
   batchItems.forEach((item, index) => {
+    const matchesSearch = batchItemMatchesSearch(item, index, batchSearchQuery);
     const article = document.createElement("article");
     const selector = document.createElement("label");
     const checkbox = document.createElement("input");
@@ -1326,6 +1487,7 @@ function renderBatchQueue() {
     const risks = getBatchItemRisks(item);
 
     article.className = "batch-item";
+    article.classList.toggle("is-search-hidden", !matchesSearch);
     article.dataset.status = item.status;
     article.dataset.batchId = item.id;
     article.dataset.riskImages = String(risks.some((risk) => risk.type === "images"));
@@ -1432,7 +1594,18 @@ function renderBatchQueue() {
 
     article.append(selector, preview, main, actions);
     batchList.appendChild(article);
+
+    if (matchesSearch) {
+      matchedBatchCount += 1;
+    }
   });
+
+  if (batchSearchQuery && !matchedBatchCount) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "没有匹配的商品。";
+    batchList.appendChild(empty);
+  }
 
   updateBatchControls();
   renderBatchLog();
@@ -1842,7 +2015,8 @@ async function collectProductFromBatchUrl(url) {
 
     const response = await withTimeout(
       sendMessageWithInjection(tab.id, {
-        type: "SPC_COLLECT_PRODUCT"
+        type: "SPC_COLLECT_PRODUCT",
+        options: getCollectorSettingsFromForm()
       }),
       timeoutMs,
       "页面采集超时"
@@ -2105,10 +2279,24 @@ function toggleBatchSelection() {
     return;
   }
 
-  const allSelected = batchItems.every((item) => selectedBatchItemIds.has(item.id));
-  selectedBatchItemIds = allSelected
-    ? new Set()
-    : new Set(batchItems.map((item) => item.id));
+  const targetItems = getBatchSearchQuery() ? getVisibleBatchItems() : batchItems;
+
+  if (!targetItems.length) {
+    return;
+  }
+
+  const allSelected = targetItems.every((item) => selectedBatchItemIds.has(item.id));
+  const nextSelectedIds = new Set(selectedBatchItemIds);
+
+  targetItems.forEach((item) => {
+    if (allSelected) {
+      nextSelectedIds.delete(item.id);
+    } else {
+      nextSelectedIds.add(item.id);
+    }
+  });
+
+  selectedBatchItemIds = nextSelectedIds;
   renderBatchQueue();
   saveBatchState();
 }
@@ -2915,6 +3103,67 @@ function getManualImageCounts(product = currentProductDraft) {
   };
 }
 
+function imagePickerStatusMatchesCurrentPage(product = currentProductDraft) {
+  if (!currentImagePickerStatus?.selector) {
+    return false;
+  }
+
+  const statusDomain = getImagePickerStatusDomain();
+  const productDomain = getProductDomain(product);
+  const tabDomain = getDomain(currentTabUrl || pageUrlInput.value || "");
+
+  return !statusDomain || statusDomain === productDomain || statusDomain === tabDomain;
+}
+
+function getImagePickerStatusUrls(status = currentImagePickerStatus) {
+  return (Array.isArray(status?.urls) ? status.urls : [])
+    .map((url) => String(url || "").trim())
+    .filter(Boolean);
+}
+
+function syncImagePickerStatusToDraft() {
+  if (!currentProductDraft || !imagePickerStatusMatchesCurrentPage(currentProductDraft)) {
+    return false;
+  }
+
+  const urls = getImagePickerStatusUrls();
+
+  if (!urls.length) {
+    return false;
+  }
+
+  const currentImages = normalizeImages(currentProductDraft.images, currentProductDraft.title);
+
+  if (
+    currentProductDraft.imageCollectionMode === "manual" &&
+    currentProductDraft.imageSourceSelector === currentImagePickerStatus.selector &&
+    currentImages.length === urls.length
+  ) {
+    return false;
+  }
+
+  currentProductDraft.imageCollectionMode = "manual";
+  currentProductDraft.imageSourceSelector = currentImagePickerStatus.selector;
+  currentProductDraft.manualImageCount = Number(
+    currentImagePickerStatus.urlCount ?? currentImagePickerStatus.imageCount ?? urls.length
+  );
+  currentProductDraft.manualImageNodeCount = Number(currentImagePickerStatus.nodeCount || 0);
+  currentProductDraft.images = normalizeImages(
+    urls.map((url) => ({
+      url,
+      source: "manual"
+    })),
+    currentProductDraft.title
+  );
+  currentProductDraft.variants = normalizeVariants(currentProductDraft, currentProductDraft.images);
+
+  renderVariants(currentProductDraft.variants);
+  renderImages(currentProductDraft.images);
+  imageSourceInfo.textContent = getImageModeLabel(currentProductDraft);
+  queueSaveDraft(`已同步手动图片区域 ${currentProductDraft.images.length} 张`);
+  return true;
+}
+
 function formatManualImageLabel(counts) {
   if (counts.urlCount > 0) {
     return `手动区域 ${counts.urlCount} 张`;
@@ -2943,22 +3192,92 @@ function getImageModeLabel(product = currentProductDraft) {
 }
 
 function normalizeImages(images, altText = currentProductDraft?.title || "") {
-  return (Array.isArray(images) ? images : []).map((image, index) => ({
-    url: image.url || "",
-    position: index + 1,
-    altText: image.altText || altText,
-    source: image.source || "",
-    check: image.check && typeof image.check === "object" ? image.check : null
-  }));
+  return (Array.isArray(images) ? images : []).map((image, index) => {
+    const normalizedImage =
+      typeof image === "string"
+        ? {
+            url: image
+          }
+        : image || {};
+
+    return {
+      url: normalizedImage.url || "",
+      position: index + 1,
+      altText: normalizedImage.altText || altText,
+      source: normalizedImage.source || "",
+      check:
+        normalizedImage.check && typeof normalizedImage.check === "object"
+          ? normalizedImage.check
+          : null
+    };
+  });
 }
 
 function getImageDedupKey(url) {
-  return String(url || "")
-    .trim()
-    .replace(/^https?:\/\//i, "")
-    .replace(/\?.*$/, "")
-    .replace(/_(?:pico|icon|thumb|small|compact|medium|large|grande|master|\d+x\d+|\d+x|x\d+)(\.(?:jpg|jpeg|png|webp))$/i, "$1")
-    .toLowerCase();
+  const normalizedUrl = String(url || "").trim();
+
+  try {
+    const parsedUrl = new URL(normalizedUrl);
+    const decodedPath = (() => {
+      try {
+        return decodeURIComponent(parsedUrl.pathname);
+      } catch (error) {
+        return parsedUrl.pathname;
+      }
+    })();
+    const normalizedPath = decodedPath
+      .toLowerCase()
+      .replace(/\/(?:resize|resized|fit|crop|thumb|thumbnail|small|medium|large)\/(?:\d{2,5}x\d{2,5}|w\d{2,5}|h\d{2,5})\//gi, "/")
+      .replace(/\/(?:w|h|width|height)[_-]?\d{2,5}(?:x\d{2,5})?\//gi, "/")
+      .replace(/\/(?:c_(?:fill|fit|crop|scale)|q_auto|f_auto|w_\d{2,5}|h_\d{2,5})(?:,[^/]*)*\//gi, "/")
+      .replace(/@(?:2x|3x)(?=\.(?:jpg|jpeg|png|webp|gif|avif)$)/i, "")
+      .replace(
+        /[_-](?:pico|icon|thumb|thumbnail|small|compact|medium|large|grande|master|\d{2,5}x\d{2,5}|\d{2,5}_\d{2,5}|w\d{2,5}|h\d{2,5}|x\d{2,5}|\d{2,5}x|\d{2,5}w|\d{2,5}h)(?=\.(?:jpg|jpeg|png|webp|gif|avif)$)/i,
+        ""
+      );
+
+    return `${parsedUrl.hostname.replace(/^www\./i, "").toLowerCase()}${normalizedPath}`;
+  } catch (error) {
+    return normalizedUrl
+      .replace(/^https?:\/\//i, "")
+      .replace(/\?.*$/, "")
+      .replace(
+        /[_-](?:pico|icon|thumb|thumbnail|small|compact|medium|large|grande|master|\d{2,5}x\d{2,5}|\d{2,5}_\d{2,5}|\d+x|x\d+)(\.(?:jpg|jpeg|png|webp|gif|avif))$/i,
+        "$1"
+      )
+      .toLowerCase();
+  }
+}
+
+function getImageUrlQualityScore(url) {
+  const text = (() => {
+    try {
+      return decodeURIComponent(String(url || ""));
+    } catch (error) {
+      return String(url || "");
+    }
+  })().toLowerCase();
+  const dimensionScore = [...text.matchAll(/(\d{2,5})[x_](\d{2,5})/gi)].reduce(
+    (score, match) => {
+      const width = Number(match[1] || 0);
+      const height = Number(match[2] || 0);
+      return Math.max(score, width * height);
+    },
+    0
+  );
+  const singleDimensionScore = [
+    ...text.matchAll(/(?:^|[?&/_-])(?:width|w)=?(\d{2,5})(?:[&/_-]|$)/gi),
+    ...text.matchAll(/(?:^|[?&/_-])(?:height|h)=?(\d{2,5})(?:[&/_-]|$)/gi)
+  ].reduce((score, match) => {
+    const size = Number(match[1] || 0);
+    return Math.max(score, size * size);
+  }, 0);
+  const qualityBonus = /(?:master|original|full|large|hires|zoom)/i.test(text) ? 250000 : 0;
+  const thumbnailPenalty = /(?:thumb|thumbnail|pico|icon|small|compact)/i.test(text)
+    ? -250000
+    : 0;
+
+  return Math.max(dimensionScore, singleDimensionScore) + qualityBonus + thumbnailPenalty;
 }
 
 function getImageSourceType(image) {
@@ -3056,6 +3375,172 @@ function updateImagePreviewSource(preview, url, altText = "商品图片") {
 
   sourceElement.classList.add("image-preview-source");
   preview.prepend(sourceElement);
+}
+
+function closeImageLightbox() {
+  const overlay = document.querySelector(".image-lightbox");
+
+  if (overlay?.__spcOnKeyDown) {
+    document.removeEventListener("keydown", overlay.__spcOnKeyDown);
+  }
+
+  overlay?.remove();
+}
+
+function getLightboxImages() {
+  return normalizeImages(currentProductDraft?.images || [], currentProductDraft?.title || "");
+}
+
+function deleteImageFromLightbox(index) {
+  if (!currentProductDraft) {
+    closeImageLightbox();
+    return;
+  }
+
+  const images = getLightboxImages();
+
+  if (!images[index]) {
+    closeImageLightbox();
+    return;
+  }
+
+  clearValidationResults();
+  updateDraftFromForm();
+  currentProductDraft.images = normalizeImages(
+    currentProductDraft.images.filter((_, imageIndex) => imageIndex !== index),
+    currentProductDraft.title
+  );
+  currentProductDraft.variants = normalizeVariants(currentProductDraft, currentProductDraft.images);
+  renderVariants(currentProductDraft.variants);
+  renderImages(currentProductDraft.images);
+  queueSaveDraft("图片已删除并保存");
+
+  if (!currentProductDraft.images.length) {
+    closeImageLightbox();
+    return;
+  }
+
+  openImageLightboxAt(Math.min(index, currentProductDraft.images.length - 1));
+}
+
+function getLightboxImageSize(image) {
+  return {
+    width: Number(image?.check?.width || 0),
+    height: Number(image?.check?.height || 0)
+  };
+}
+
+function formatLightboxCaption(index, total, width = 0, height = 0) {
+  const sizeLabel = width && height ? `${width}x${height}` : "尺寸读取中";
+
+  return `#${index + 1} / ${total} · ${sizeLabel}`;
+}
+
+function openImageLightboxAt(index = 0) {
+  const images = getLightboxImages();
+  const total = images.length;
+  const safeIndex = Math.min(Math.max(Number(index) || 0, 0), Math.max(total - 1, 0));
+  const currentImage = images[safeIndex];
+  const normalizedUrl = String(currentImage?.url || "").trim();
+
+  if (!normalizedUrl) {
+    return;
+  }
+
+  closeImageLightbox();
+
+  const overlay = document.createElement("div");
+  const frame = document.createElement("figure");
+  const toolbar = document.createElement("div");
+  const image = document.createElement("img");
+  const caption = document.createElement("figcaption");
+  const previousButton = document.createElement("button");
+  const nextButton = document.createElement("button");
+  const deleteButton = document.createElement("button");
+  const closeButton = document.createElement("button");
+  const openLink = document.createElement("a");
+
+  overlay.className = "image-lightbox";
+  overlay.tabIndex = -1;
+  frame.className = "image-lightbox-frame";
+  toolbar.className = "image-lightbox-toolbar";
+  image.alt = currentImage.altText || "商品图片";
+  image.decoding = "async";
+  caption.className = "image-lightbox-caption";
+  const knownSize = getLightboxImageSize(currentImage);
+  caption.textContent = formatLightboxCaption(
+    safeIndex,
+    total,
+    knownSize.width,
+    knownSize.height
+  );
+  image.addEventListener("load", () => {
+    caption.textContent = formatLightboxCaption(
+      safeIndex,
+      total,
+      image.naturalWidth,
+      image.naturalHeight
+    );
+  });
+  image.src = normalizedUrl;
+  previousButton.type = "button";
+  previousButton.className = "image-lightbox-nav";
+  previousButton.textContent = "上一张";
+  previousButton.disabled = total <= 1;
+  nextButton.type = "button";
+  nextButton.className = "image-lightbox-nav";
+  nextButton.textContent = "下一张";
+  nextButton.disabled = total <= 1;
+  deleteButton.type = "button";
+  deleteButton.className = "image-lightbox-delete";
+  deleteButton.textContent = "删除";
+  closeButton.type = "button";
+  closeButton.className = "image-lightbox-close";
+  closeButton.textContent = "关闭";
+  openLink.className = "image-lightbox-link";
+  openLink.href = normalizedUrl;
+  openLink.target = "_blank";
+  openLink.rel = "noreferrer";
+  openLink.textContent = "打开原图";
+
+  previousButton.addEventListener("click", () => {
+    openImageLightboxAt((safeIndex - 1 + total) % total);
+  });
+  nextButton.addEventListener("click", () => {
+    openImageLightboxAt((safeIndex + 1) % total);
+  });
+  deleteButton.addEventListener("click", () => {
+    deleteImageFromLightbox(safeIndex);
+  });
+  closeButton.addEventListener("click", closeImageLightbox);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) {
+      closeImageLightbox();
+    }
+  });
+
+  const onKeyDown = (event) => {
+    if (event.key === "Escape") {
+      closeImageLightbox();
+    } else if (event.key === "ArrowLeft" && total > 1) {
+      event.preventDefault();
+      openImageLightboxAt((safeIndex - 1 + total) % total);
+    } else if (event.key === "ArrowRight" && total > 1) {
+      event.preventDefault();
+      openImageLightboxAt((safeIndex + 1) % total);
+    } else if (event.key === "Delete" || event.key === "Backspace") {
+      event.preventDefault();
+      deleteImageFromLightbox(safeIndex);
+    }
+  };
+
+  overlay.__spcOnKeyDown = onKeyDown;
+  document.addEventListener("keydown", onKeyDown);
+  toolbar.append(previousButton, nextButton, deleteButton, openLink);
+  frame.append(image, caption, toolbar, closeButton);
+  overlay.append(frame);
+  document.body.appendChild(overlay);
+  overlay.focus({ preventScroll: true });
 }
 
 function createImageCheck(status, extra = {}) {
@@ -3309,18 +3794,38 @@ function filterDuplicateImages() {
 
   updateDraftFromForm();
   const seen = new Set();
+  const indexesByKey = new Map();
   const beforeCount = currentProductDraft.images.length;
-  currentProductDraft.images = normalizeImages(
-    currentProductDraft.images.filter((image) => {
-      const key = getImageDedupKey(image.url);
+  const dedupedImages = [];
 
-      if (!key || seen.has(key)) {
-        return false;
+  currentProductDraft.images.forEach((image) => {
+    const key = getImageDedupKey(image.url);
+
+    if (!key) {
+      return;
+    }
+
+    if (seen.has(key)) {
+      const existingIndex = indexesByKey.get(key);
+      const existingImage = dedupedImages[existingIndex];
+
+      if (
+        existingImage &&
+        getImageUrlQualityScore(image.url) > getImageUrlQualityScore(existingImage.url)
+      ) {
+        dedupedImages[existingIndex] = image;
       }
 
-      seen.add(key);
-      return true;
-    }),
+      return;
+    }
+
+    seen.add(key);
+    indexesByKey.set(key, dedupedImages.length);
+    dedupedImages.push(image);
+  });
+
+  currentProductDraft.images = normalizeImages(
+    dedupedImages,
     currentProductDraft.title
   );
   const removedCount = beforeCount - currentProductDraft.images.length;
@@ -3427,8 +3932,28 @@ function getCheckedIndexes(selector) {
     .filter((index) => Number.isInteger(index) && index >= 0);
 }
 
-function updateVariantSelectionToolbar() {
+function getTargetVariantCheckboxes() {
   const checkboxes = Array.from(variantList.querySelectorAll(".variant-select-checkbox"));
+
+  if (!getVariantSearchQuery()) {
+    return checkboxes;
+  }
+
+  return checkboxes.filter(
+    (checkbox) => !checkbox.closest(".variant-item")?.classList.contains("is-search-hidden")
+  );
+}
+
+function getSelectedVariantIndexes() {
+  return getTargetVariantCheckboxes()
+    .filter((checkbox) => checkbox.checked)
+    .map((checkbox) => Number(checkbox.dataset.index))
+    .filter((index) => Number.isInteger(index) && index >= 0);
+}
+
+function updateVariantSelectionToolbar() {
+  const checkboxes = getTargetVariantCheckboxes();
+  const totalVariantCount = variantList.querySelectorAll(".variant-select-checkbox").length;
   const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
   const allSelected = checkboxes.length > 0 && selectedCount === checkboxes.length;
   const selectedItems = checkboxes
@@ -3442,10 +3967,15 @@ function updateVariantSelectionToolbar() {
     (item) => item.dataset.exportExcluded === "true"
   );
 
-  variantSelectAllButton.textContent = allSelected ? "取消全选" : "全选";
-  deleteSelectedVariantsButton.disabled = !selectedCount || checkboxes.length <= 1;
+  variantSelectAllButton.textContent = allSelected
+    ? "取消全选"
+    : getVariantSearchQuery()
+      ? "全选结果"
+      : "全选";
+  deleteSelectedVariantsButton.disabled = !selectedCount || totalVariantCount <= 1;
   excludeSelectedVariantsButton.disabled = !selectedCount || !hasSelectedExported;
   includeSelectedVariantsButton.disabled = !selectedCount || !hasSelectedExcluded;
+  updateVariantSkuToolbar();
 }
 
 function updateImageSelectionToolbar() {
@@ -3458,7 +3988,7 @@ function updateImageSelectionToolbar() {
 }
 
 function setVariantSelection(checked) {
-  variantList.querySelectorAll(".variant-select-checkbox").forEach((checkbox) => {
+  getTargetVariantCheckboxes().forEach((checkbox) => {
     checkbox.checked = checked;
     checkbox.closest(".variant-item")?.classList.toggle("is-selected", checked);
   });
@@ -3478,7 +4008,7 @@ function deleteSelectedVariants() {
     return;
   }
 
-  const selectedIndexes = new Set(getCheckedIndexes(".variant-select-checkbox"));
+  const selectedIndexes = new Set(getSelectedVariantIndexes());
 
   if (!selectedIndexes.size || currentProductDraft.variants.length <= 1) {
     return;
@@ -3509,7 +4039,7 @@ function setSelectedVariantsExportState(excludedFromExport) {
     return;
   }
 
-  const selectedIndexes = new Set(getCheckedIndexes(".variant-select-checkbox"));
+  const selectedIndexes = new Set(getSelectedVariantIndexes());
 
   if (!selectedIndexes.size) {
     return;
@@ -3708,7 +4238,7 @@ function normalizeDraft(product) {
     vendor: product.vendor || "",
     type: product.type || "",
     tags: product.tags || "",
-    status: product.status || "draft",
+    status: product.status || "active",
     published: product.published || "false",
     sku,
     price,
@@ -3761,6 +4291,361 @@ function getVariantsFromForm() {
       item.querySelector("[data-variant-field='variantImageUrl']")?.value.trim() || "",
     excludedFromExport: item.dataset.exportExcluded === "true"
   }));
+}
+
+function getVariantSearchQuery() {
+  return variantSearchInput?.value.trim() || "";
+}
+
+function getVariantSearchValues(variant, index = 0) {
+  return [
+    `#${index + 1}`,
+    variant.sku,
+    variant.barcode,
+    variant.option1Name,
+    variant.option1Value,
+    variant.option2Name,
+    variant.option2Value,
+    variant.option3Name,
+    variant.option3Value,
+    variant.price,
+    variant.compareAtPrice,
+    variant.variantImageUrl,
+    variant.excludedFromExport ? "不导出" : "导出"
+  ];
+}
+
+function variantMatchesSearch(variant, index = 0, query = getVariantSearchQuery()) {
+  return fuzzySearchMatches(query, getVariantSearchValues(variant, index));
+}
+
+function normalizeVariantDuplicateText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^#\s*/, "")
+    .replace(/\b(\d+(?:\.\d+)?)\s*(ml|m l)\b/gi, "$1ml")
+    .replace(/\b(\d+(?:\.\d+)?)\s*(fl\s*oz|floz)\b/gi, "$1floz")
+    .replace(/\b(\d+(?:\.\d+)?)\s*(oz|g|kg|l|ct|count|pack|packs|pc|pcs)\b/gi, "$1$2")
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeVariantDuplicatePrice(value) {
+  const text = String(value || "").trim();
+  const match = text.replace(/,/g, "").match(/\d+(?:\.\d{1,2})?/);
+
+  if (!match) {
+    return "";
+  }
+
+  const number = Number(match[0]);
+
+  return Number.isFinite(number) ? number.toFixed(2) : match[0];
+}
+
+function getVariantDuplicateKey(variant) {
+  const sku = normalizeVariantDuplicateText(variant.sku);
+
+  if (sku) {
+    return `sku:${sku}`;
+  }
+
+  const values = [
+    variant.option1Value,
+    variant.option2Value,
+    variant.option3Value
+  ].map(normalizeVariantDuplicateText);
+  const hasValue = values.some(Boolean);
+
+  if (!hasValue) {
+    return "";
+  }
+
+  return `options:${values.join("|")}:price:${normalizeVariantDuplicatePrice(variant.price)}`;
+}
+
+function getVariantDuplicateGroups(variants = []) {
+  const groups = new Map();
+
+  variants.forEach((variant, index) => {
+    const key = getVariantDuplicateKey(variant);
+
+    if (!key) {
+      return;
+    }
+
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+
+    groups.get(key).push({ variant, index });
+  });
+
+  return [...groups.values()].filter((group) => group.length > 1);
+}
+
+function getVariantDuplicateStats(variants = currentProductDraft?.variants || []) {
+  const groups = getVariantDuplicateGroups(variants);
+  const duplicateCount = groups.reduce((total, group) => total + group.length - 1, 0);
+
+  return {
+    groups,
+    groupCount: groups.length,
+    duplicateCount
+  };
+}
+
+function updateVariantDuplicateToolbar(variants = null) {
+  const sourceVariants =
+    variants ||
+    (currentProductDraft ? getVariantsFromForm() : []);
+  const stats = getVariantDuplicateStats(sourceVariants);
+
+  mergeDuplicateVariantsButton.disabled = !stats.duplicateCount;
+  mergeDuplicateVariantsButton.textContent = stats.duplicateCount
+    ? `合并重复 ${stats.duplicateCount}`
+    : "合并重复";
+  mergeDuplicateVariantsButton.title = stats.duplicateCount
+    ? `发现 ${stats.groupCount} 组重复，可合并 ${stats.duplicateCount} 个变体`
+    : "未发现重复变体";
+}
+
+function getTargetVariantIndexesForSkuFill(variants = getVariantsFromForm()) {
+  const selectedIndexes = getSelectedVariantIndexes();
+
+  if (selectedIndexes.length) {
+    return selectedIndexes.filter((index) => variants[index] && !variants[index].sku);
+  }
+
+  return variants
+    .map((variant, index) => ({ variant, index }))
+    .filter(({ variant }) => !String(variant.sku || "").trim())
+    .map(({ index }) => index);
+}
+
+function updateVariantSkuToolbar(variants = null) {
+  if (!fillVariantSkuButton) {
+    return;
+  }
+
+  const sourceVariants =
+    variants ||
+    (currentProductDraft ? getVariantsFromForm() : []);
+  const targetCount = getTargetVariantIndexesForSkuFill(sourceVariants).length;
+  const selectedCount = getSelectedVariantIndexes().length;
+
+  fillVariantSkuButton.disabled = !currentProductDraft || !targetCount;
+  fillVariantSkuButton.textContent = targetCount ? `补齐 SKU ${targetCount}` : "补齐 SKU";
+  fillVariantSkuButton.title = targetCount
+    ? selectedCount
+      ? `为选中的 ${targetCount} 个空 SKU 变体生成 SKU`
+      : `为全部 ${targetCount} 个空 SKU 变体生成 SKU`
+    : selectedCount
+      ? "选中变体没有空 SKU"
+      : "没有需要补齐的空 SKU";
+}
+
+function getSkuSegment(value, fallback = "item") {
+  const source = String(value || "").trim();
+  const asciiSegment = generateHandle(source)
+    .replace(/[^\w-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+
+  if (asciiSegment) {
+    return asciiSegment;
+  }
+
+  return `${fallback}-${hashString(source || fallback)}`.slice(0, 48);
+}
+
+function getVariantSkuBase(product = currentProductDraft) {
+  return getSkuSegment(
+    product?.handle ||
+      productHandleInput?.value ||
+      product?.title ||
+      productTitleInput?.value ||
+      "product",
+    "product"
+  );
+}
+
+function getVariantSkuParts(variant, index, product = currentProductDraft) {
+  const optionValues = [
+    variant.option1Value,
+    variant.option2Value,
+    variant.option3Value
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .filter((value) => !/^default title$/i.test(value));
+  const parts = [getVariantSkuBase(product)];
+
+  optionValues.forEach((value, valueIndex) => {
+    parts.push(getSkuSegment(value, `v${valueIndex + 1}`));
+  });
+
+  if (parts.length === 1) {
+    parts.push(`v${index + 1}`);
+  }
+
+  return parts;
+}
+
+function getUniqueVariantSku(baseSku, usedSkus) {
+  const normalizedBase = String(baseSku || "sku")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "sku";
+  let candidate = normalizedBase;
+  let suffix = 2;
+
+  while (usedSkus.has(candidate.toLowerCase())) {
+    const suffixText = `-${suffix}`;
+    candidate = `${normalizedBase.slice(0, Math.max(1, 80 - suffixText.length))}${suffixText}`;
+    suffix += 1;
+  }
+
+  usedSkus.add(candidate.toLowerCase());
+  return candidate;
+}
+
+function fillVariantSkus() {
+  if (!currentProductDraft) {
+    return;
+  }
+
+  clearValidationResults();
+  updateDraftFromForm();
+
+  const variants = normalizeVariants(currentProductDraft);
+  const targetIndexes = new Set(getTargetVariantIndexesForSkuFill(variants));
+
+  if (!targetIndexes.size) {
+    updateVariantSkuToolbar(variants);
+    setStatus("没有需要补齐的空 SKU", "idle");
+    return;
+  }
+
+  const usedSkus = new Set(
+    variants
+      .map((variant) => String(variant.sku || "").trim())
+      .filter(Boolean)
+      .map((sku) => sku.toLowerCase())
+  );
+  let filledCount = 0;
+
+  currentProductDraft.variants = variants.map((variant, index) => {
+    if (!targetIndexes.has(index)) {
+      return variant;
+    }
+
+    const baseSku = getVariantSkuParts(variant, index).join("-");
+    const sku = getUniqueVariantSku(baseSku, usedSkus);
+    filledCount += 1;
+
+    return {
+      ...variant,
+      sku
+    };
+  });
+
+  renderVariants(currentProductDraft.variants);
+  queueSaveDraft(`已补齐 ${filledCount} 个变体 SKU`);
+  setStatus(`已补齐 ${filledCount} 个变体 SKU`, "success");
+}
+
+function scoreVariantCompleteness(variant) {
+  return [
+    variant.sku,
+    variant.barcode,
+    variant.option1Name,
+    variant.option1Value,
+    variant.option2Name,
+    variant.option2Value,
+    variant.option3Name,
+    variant.option3Value,
+    variant.price,
+    variant.compareAtPrice,
+    variant.variantImageUrl
+  ].filter((value) => String(value || "").trim()).length +
+    (variant.excludedFromExport ? 0 : 2);
+}
+
+function mergeVariantField(primaryValue, fallbackValue) {
+  const primary = String(primaryValue || "").trim();
+  const fallback = String(fallbackValue || "").trim();
+
+  if (!primary) {
+    return fallback;
+  }
+
+  if (!fallback) {
+    return primary;
+  }
+
+  return primary.length >= fallback.length ? primary : fallback;
+}
+
+function mergeDuplicateVariantGroup(group) {
+  const sortedGroup = [...group].sort(
+    (left, right) => scoreVariantCompleteness(right.variant) - scoreVariantCompleteness(left.variant)
+  );
+  const merged = { ...sortedGroup[0].variant };
+
+  sortedGroup.slice(1).forEach(({ variant }) => {
+    merged.sku = mergeVariantField(merged.sku, variant.sku);
+    merged.barcode = mergeVariantField(merged.barcode, variant.barcode);
+    merged.option1Name = mergeVariantField(merged.option1Name, variant.option1Name);
+    merged.option1Value = mergeVariantField(merged.option1Value, variant.option1Value);
+    merged.option2Name = mergeVariantField(merged.option2Name, variant.option2Name);
+    merged.option2Value = mergeVariantField(merged.option2Value, variant.option2Value);
+    merged.option3Name = mergeVariantField(merged.option3Name, variant.option3Name);
+    merged.option3Value = mergeVariantField(merged.option3Value, variant.option3Value);
+    merged.price = mergeVariantField(merged.price, variant.price);
+    merged.compareAtPrice = mergeVariantField(merged.compareAtPrice, variant.compareAtPrice);
+    merged.variantImageUrl = mergeVariantField(merged.variantImageUrl, variant.variantImageUrl);
+    merged.excludedFromExport = Boolean(merged.excludedFromExport && variant.excludedFromExport);
+  });
+
+  return merged;
+}
+
+function mergeDuplicateVariants() {
+  if (!currentProductDraft) {
+    return;
+  }
+
+  updateDraftFromForm();
+  const variants = normalizeVariants(currentProductDraft);
+  const stats = getVariantDuplicateStats(variants);
+
+  if (!stats.duplicateCount) {
+    updateVariantDuplicateToolbar(variants);
+    setStatus("未发现重复变体", "idle");
+    return;
+  }
+
+  const mergedByFirstIndex = new Map(
+    stats.groups.map((group) => [group[0].index, mergeDuplicateVariantGroup(group)])
+  );
+  const duplicateIndexes = new Set(
+    stats.groups.flatMap((group) => group.slice(1).map((item) => item.index))
+  );
+
+  currentProductDraft.variants = variants
+    .map((variant, index) => mergedByFirstIndex.get(index) || variant)
+    .filter((_, index) => !duplicateIndexes.has(index));
+
+  clearValidationResults();
+  renderVariants(currentProductDraft.variants);
+  queueSaveDraft(`已合并 ${stats.duplicateCount} 个重复变体`);
+  setStatus(
+    `已合并 ${stats.duplicateCount} 个重复变体，保留 ${currentProductDraft.variants.length} 个变体`,
+    "success"
+  );
 }
 
 function isStrictPrice(value) {
@@ -4014,7 +4899,16 @@ function renderImages(images) {
   const visibleImages = productImages
     .map((image, index) => ({ image, index }))
     .filter(({ image }) => imageMatchesSourceFilter(image));
+  const shouldLimitImageGridHeight = visibleImages.length > IMAGE_SCROLL_THRESHOLD;
   imageCount.textContent = `${productImages.length} 张`;
+  imagePanel?.classList.toggle("has-scrollable-images", shouldLimitImageGridHeight);
+  imageGrid.tabIndex = shouldLimitImageGridHeight ? 0 : -1;
+  imageGrid.setAttribute(
+    "aria-label",
+    shouldLimitImageGridHeight
+      ? `商品图片预览，${visibleImages.length} 张，可滚动`
+      : "商品图片预览"
+  );
 
   if (!productImages.length) {
     const empty = document.createElement("p");
@@ -4048,6 +4942,24 @@ function renderImages(images) {
 
     const preview = document.createElement("div");
     preview.className = "image-preview";
+    preview.tabIndex = 0;
+    preview.setAttribute("role", "button");
+    preview.setAttribute("aria-label", `Preview image ${image.position}`);
+    preview.addEventListener("click", (event) => {
+      if (event.target.closest("button, label, input, a")) {
+        return;
+      }
+
+      openImageLightboxAt(index);
+    });
+    preview.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+
+      event.preventDefault();
+      openImageLightboxAt(index);
+    });
     updateImagePreviewSource(preview, image.url, image.altText || "商品图片");
 
     const caption = document.createElement("figcaption");
@@ -4203,6 +5115,8 @@ function createVariantInput(field, labelText, value, options = {}) {
   input.addEventListener("input", () => {
     clearValidationResults();
     updateDraftFromForm();
+    updateVariantDuplicateToolbar();
+    updateVariantSkuToolbar();
     queueSaveDraft();
   });
 
@@ -4220,9 +5134,24 @@ function renderVariants(variants) {
   const exportableCount = normalizedVariants.filter(
     (variant) => !variant.excludedFromExport
   ).length;
-  variantCount.textContent = `${exportableCount}/${normalizedVariants.length} 导出`;
+  const variantSearchQuery = getVariantSearchQuery();
+  let matchedVariantCount = 0;
+  const shouldLimitVariantListHeight = normalizedVariants.length > 4;
+
+  variantCount.textContent = variantSearchQuery
+    ? `${matchedVariantCount}/${normalizedVariants.length} 命中`
+    : `${exportableCount}/${normalizedVariants.length} 导出`;
+  variantPanel?.classList.toggle("has-scrollable-variants", shouldLimitVariantListHeight);
+  variantList.tabIndex = shouldLimitVariantListHeight ? 0 : -1;
+  variantList.setAttribute(
+    "aria-label",
+    shouldLimitVariantListHeight
+      ? `变体列表，${normalizedVariants.length} 个，可滚动`
+      : "变体列表"
+  );
 
   normalizedVariants.forEach((variant, index) => {
+    const matchesSearch = variantMatchesSearch(variant, index, variantSearchQuery);
     const item = document.createElement("article");
     const header = document.createElement("div");
     const titleWrap = document.createElement("label");
@@ -4233,6 +5162,7 @@ function renderVariants(variants) {
     const fields = document.createElement("div");
 
     item.className = "variant-item";
+    item.classList.toggle("is-search-hidden", !matchesSearch);
     item.classList.toggle("is-export-excluded", variant.excludedFromExport);
     item.dataset.variantIndex = String(index);
     item.dataset.exportExcluded = String(Boolean(variant.excludedFromExport));
@@ -4310,9 +5240,26 @@ function renderVariants(variants) {
     header.append(titleWrap, deleteButton);
     item.append(header, fields);
     variantList.appendChild(item);
+
+    if (matchesSearch) {
+      matchedVariantCount += 1;
+    }
   });
 
+  if (variantSearchQuery) {
+    variantCount.textContent = `${matchedVariantCount}/${normalizedVariants.length} 命中`;
+  }
+
+  if (variantSearchQuery && !matchedVariantCount) {
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "没有匹配的变体。";
+    variantList.appendChild(empty);
+  }
+
   updateVariantSelectionToolbar();
+  updateVariantDuplicateToolbar(normalizedVariants);
+  updateVariantSkuToolbar(normalizedVariants);
 }
 
 function addVariant() {
@@ -4426,7 +5373,8 @@ async function collectCurrentProduct() {
     currentDraftKey = getDraftStorageKey(currentTabUrl);
 
     const response = await sendMessageWithInjection(tab.id, {
-      type: "SPC_COLLECT_PRODUCT"
+      type: "SPC_COLLECT_PRODUCT",
+      options: getCollectorSettingsFromForm()
     });
 
     if (!response || !response.ok) {
@@ -4537,7 +5485,9 @@ async function refreshImagePickerStatus(tabId) {
       currentImagePickerStatus = response.data || null;
 
       if (currentProductDraft) {
-        imageSourceInfo.textContent = getImageModeLabel(currentProductDraft);
+        if (!syncImagePickerStatusToDraft()) {
+          imageSourceInfo.textContent = getImageModeLabel(currentProductDraft);
+        }
       }
     }
   } catch (error) {
@@ -4546,7 +5496,10 @@ async function refreshImagePickerStatus(tabId) {
 }
 
 async function resetImageCollectionMode() {
-  resetImageModeButton.disabled = true;
+  if (resetImageModeButton) {
+    resetImageModeButton.disabled = true;
+  }
+
   setStatus("正在切回自动采图模式...", "loading");
 
   try {
@@ -4571,7 +5524,9 @@ async function resetImageCollectionMode() {
       currentProductDraft.imageCollectionMode = "auto";
       currentProductDraft.manualImageCount = 0;
       currentProductDraft.manualImageNodeCount = 0;
-      imageSourceInfo.textContent = "自动";
+      if (imageSourceInfo) {
+        imageSourceInfo.textContent = "自动";
+      }
       queueSaveDraft("已切回自动采图模式");
     }
 
@@ -4579,7 +5534,9 @@ async function resetImageCollectionMode() {
   } catch (error) {
     setStatus(error.message || "切换自动采图失败", "error");
   } finally {
-    resetImageModeButton.disabled = false;
+    if (resetImageModeButton) {
+      resetImageModeButton.disabled = false;
+    }
   }
 }
 
@@ -4596,20 +5553,20 @@ function bindDraftInputs() {
     productPublishedSelect,
     productHandleInput,
     productDescriptionInput
-  ].forEach((input) => {
-    input.addEventListener("input", () => {
+  ].filter(Boolean).forEach((input) => {
+    addSafeEventListener(input, "input", () => {
       clearValidationResults();
       updateDraftFromForm();
       queueSaveDraft();
     });
-    input.addEventListener("change", () => {
+    addSafeEventListener(input, "change", () => {
       clearValidationResults();
       updateDraftFromForm();
       queueSaveDraft();
     });
   });
 
-  productTitleInput.addEventListener("input", () => {
+  addSafeEventListener(productTitleInput, "input", () => {
     if (!currentProductDraft) {
       return;
     }
@@ -4620,7 +5577,7 @@ function bindDraftInputs() {
     queueSaveDraft();
   });
 
-  regenerateHandleButton.addEventListener("click", () => {
+  addSafeEventListener(regenerateHandleButton, "click", () => {
     if (!currentProductDraft) {
       return;
     }
@@ -4631,7 +5588,7 @@ function bindDraftInputs() {
     queueSaveDraft("Handle 已重新生成并保存");
   });
 
-  clearDraftButton.addEventListener("click", async () => {
+  addSafeEventListener(clearDraftButton, "click", async () => {
     if (!currentDraftKey) {
       return;
     }
@@ -4672,6 +5629,7 @@ async function initializePopup() {
       title: tab?.title || "",
       url: currentTabUrl
     });
+    await loadCollectorSettings();
     await refreshSiteRulePanel();
     const shouldExpandSiteRule = await chromeStorageGet(SITE_RULE_EXPAND_AFTER_PICK_KEY);
 
@@ -4718,80 +5676,92 @@ async function initializePopup() {
 
 bindButtonFeedback();
 bindDraftInputs();
-collectButton.addEventListener("click", collectCurrentProduct);
-exportCsvButton.addEventListener("click", exportCurrentProductCsv);
-resetAllButton.addEventListener("click", resetAllState);
-testSiteRuleButton.addEventListener("click", testSiteRule);
-saveSiteRuleButton.addEventListener("click", saveSiteRule);
-clearSiteRuleButton.addEventListener("click", clearSiteRule);
+addSafeEventListener(collectButton, "click", collectCurrentProduct);
+addSafeEventListener(exportCsvButton, "click", exportCurrentProductCsv);
+addSafeEventListener(resetAllButton, "click", resetAllState);
+addSafeEventListener(testSiteRuleButton, "click", testSiteRule);
+addSafeEventListener(saveSiteRuleButton, "click", saveSiteRule);
+addSafeEventListener(clearSiteRuleButton, "click", clearSiteRule);
 siteRulePickButtons.forEach((button) => {
-  button.addEventListener("click", () => {
+  addSafeEventListener(button, "click", () => {
     startSiteRulePicker(button.dataset.siteRuleField);
   });
 });
 siteRuleClearButtons.forEach((button) => {
-  button.addEventListener("click", () => {
+  addSafeEventListener(button, "click", () => {
     clearSiteRuleField(button.dataset.siteRuleClearField);
   });
 });
-discoverBatchUrlsButton.addEventListener("click", discoverBatchUrlsFromCurrentPage);
-prepareBatchButton.addEventListener("click", prepareBatchQueue);
-precheckBatchButton.addEventListener("click", precheckBatchQueue);
-startBatchButton.addEventListener("click", startBatchCollection);
-stopBatchButton.addEventListener("click", stopBatchCollection);
-exportBatchCsvButton.addEventListener("click", exportBatchCsv);
-exportSelectedBatchCsvButton.addEventListener("click", () => {
+addSafeEventListener(discoverBatchUrlsButton, "click", discoverBatchUrlsFromCurrentPage);
+addSafeEventListener(prepareBatchButton, "click", prepareBatchQueue);
+addSafeEventListener(precheckBatchButton, "click", precheckBatchQueue);
+addSafeEventListener(startBatchButton, "click", startBatchCollection);
+addSafeEventListener(stopBatchButton, "click", stopBatchCollection);
+addSafeEventListener(exportBatchCsvButton, "click", exportBatchCsv);
+addSafeEventListener(exportSelectedBatchCsvButton, "click", () => {
   exportBatchCsv({ selectedOnly: true });
 });
-retryFailedBatchButton.addEventListener("click", retryFailedBatchItems);
-selectAllBatchButton.addEventListener("click", toggleBatchSelection);
-deleteSelectedBatchButton.addEventListener("click", deleteSelectedBatchItems);
-fixDuplicateHandlesButton.addEventListener("click", fixDuplicateBatchHandles);
-clearBatchButton.addEventListener("click", clearBatchQueue);
-batchTimeoutInput.addEventListener("change", () => {
+addSafeEventListener(retryFailedBatchButton, "click", retryFailedBatchItems);
+addSafeEventListener(selectAllBatchButton, "click", toggleBatchSelection);
+addSafeEventListener(deleteSelectedBatchButton, "click", deleteSelectedBatchItems);
+addSafeEventListener(fixDuplicateHandlesButton, "click", fixDuplicateBatchHandles);
+addSafeEventListener(clearBatchButton, "click", clearBatchQueue);
+addSafeEventListener(batchTimeoutInput, "change", () => {
   batchTimeoutInput.value = String(getBatchTimeoutSeconds());
   saveBatchState();
   setStatus(`采集超时已设置为 ${getBatchTimeoutSeconds()} 秒`, "success");
 });
-batchVendorInput.addEventListener("input", updateBatchEditControls);
-batchTagsInput.addEventListener("input", updateBatchEditControls);
-applyBatchEditButton.addEventListener("click", applyBatchEditsToSelectedItems);
-batchList.addEventListener("click", handleBatchListClick);
-batchList.addEventListener("change", handleBatchListChange);
-batchList.addEventListener("keydown", handleBatchListKeydown);
-clearBatchLogButton.addEventListener("click", () => {
+addSafeEventListener(amazonVariantPaginationInput, "change", saveCollectorSettingsFromForm);
+addSafeEventListener(batchSearchInput, "input", renderBatchQueue);
+addSafeEventListener(batchVendorInput, "input", updateBatchEditControls);
+addSafeEventListener(batchTagsInput, "input", updateBatchEditControls);
+addSafeEventListener(applyBatchEditButton, "click", applyBatchEditsToSelectedItems);
+addSafeEventListener(batchList, "click", handleBatchListClick);
+addSafeEventListener(batchList, "change", handleBatchListChange);
+addSafeEventListener(batchList, "keydown", handleBatchListKeydown);
+addSafeEventListener(clearBatchLogButton, "click", () => {
   batchLogs = [];
   renderBatchLog();
   saveBatchState();
 });
-selectImageAreaButton.addEventListener("click", startImageAreaPicker);
-addImageButton.addEventListener("click", addManualImage);
-addVariantButton.addEventListener("click", addVariant);
-resetImageModeButton.addEventListener("click", resetImageCollectionMode);
-variantSelectAllButton.addEventListener("click", () => {
-  const checkboxes = Array.from(variantList.querySelectorAll(".variant-select-checkbox"));
+addSafeEventListener(selectImageAreaButton, "click", startImageAreaPicker);
+addSafeEventListener(addImageButton, "click", addManualImage);
+addSafeEventListener(addVariantButton, "click", addVariant);
+addSafeEventListener(resetImageModeButton, "click", resetImageCollectionMode);
+addSafeEventListener(variantSelectAllButton, "click", () => {
+  const checkboxes = getTargetVariantCheckboxes();
   setVariantSelection(checkboxes.some((checkbox) => !checkbox.checked));
 });
-deleteSelectedVariantsButton.addEventListener("click", deleteSelectedVariants);
-excludeSelectedVariantsButton.addEventListener("click", () => {
+addSafeEventListener(variantSearchInput, "input", () => {
+  if (!currentProductDraft) {
+    return;
+  }
+
+  updateDraftFromForm();
+  renderVariants(currentProductDraft.variants);
+});
+addSafeEventListener(deleteSelectedVariantsButton, "click", deleteSelectedVariants);
+addSafeEventListener(excludeSelectedVariantsButton, "click", () => {
   setSelectedVariantsExportState(true);
 });
-includeSelectedVariantsButton.addEventListener("click", () => {
+addSafeEventListener(includeSelectedVariantsButton, "click", () => {
   setSelectedVariantsExportState(false);
 });
-imageSelectAllButton.addEventListener("click", () => {
+addSafeEventListener(mergeDuplicateVariantsButton, "click", mergeDuplicateVariants);
+addSafeEventListener(fillVariantSkuButton, "click", fillVariantSkus);
+addSafeEventListener(imageSelectAllButton, "click", () => {
   const checkboxes = Array.from(imageGrid.querySelectorAll(".image-select-checkbox"));
   setImageSelection(checkboxes.some((checkbox) => !checkbox.checked));
 });
-checkImagesButton.addEventListener("click", checkCurrentImages);
-filterSmallImagesButton.addEventListener("click", filterSmallImages);
-filterDuplicateImagesButton.addEventListener("click", filterDuplicateImages);
-fillImageAltButton.addEventListener("click", fillImageAltText);
-replaceImageDomainButton.addEventListener("click", replaceImageDomain);
-imageSourceFilter.addEventListener("change", () => {
+addSafeEventListener(checkImagesButton, "click", checkCurrentImages);
+addSafeEventListener(filterSmallImagesButton, "click", filterSmallImages);
+addSafeEventListener(filterDuplicateImagesButton, "click", filterDuplicateImages);
+addSafeEventListener(fillImageAltButton, "click", fillImageAltText);
+addSafeEventListener(replaceImageDomainButton, "click", replaceImageDomain);
+addSafeEventListener(imageSourceFilter, "change", () => {
   renderImages(currentProductDraft?.images || []);
 });
-deleteSelectedImagesButton.addEventListener("click", deleteSelectedImages);
+addSafeEventListener(deleteSelectedImagesButton, "click", deleteSelectedImages);
 bindCollapsibleSection(batchToggleButton, batchBody);
 bindCollapsibleSection(batchTitleToggle, batchBody);
 bindCollapsibleHeader(batchHeader, batchBody);

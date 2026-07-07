@@ -5,10 +5,9 @@
 
   window.__SHOPIFY_PRODUCT_COLLECTOR_CONTENT_READY__ = true;
 
-  const MAX_IMAGE_COUNT = 10;
-  const MAX_VARIANT_COUNT = 60;
-  const MAX_AMAZON_VARIANT_COUNT = 24;
   const SITE_RULE_STORAGE_PREFIX = "spc:site-rule:";
+  let amazonImageScriptTextsCache = null;
+  const amazonVariantScriptImageCache = new Map();
   const IMAGE_NODE_SELECTOR = [
     "img",
     "source",
@@ -60,6 +59,20 @@
     return String(value || "")
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  function delay(ms) {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, ms);
+    });
+  }
+
+  function normalizeCollectorOptions(options = {}) {
+    const sourceOptions = options && typeof options === "object" ? options : {};
+
+    return {
+      amazonFollowVariantPages: Boolean(sourceOptions.amazonFollowVariantPages)
+    };
   }
 
   function getMetaContent(selectors) {
@@ -550,11 +563,69 @@
     return normalizeShopifyImageUrl(normalizeAmazonImageUrl(unwrapProxiedImageUrl(url)));
   }
 
+  function normalizeImageDedupPath(pathname) {
+    const decodedPath = (() => {
+      try {
+        return decodeURIComponent(pathname);
+      } catch (error) {
+        return pathname;
+      }
+    })();
+
+    return decodedPath
+      .toLowerCase()
+      .replace(/\/(?:resize|resized|fit|crop|thumb|thumbnail|small|medium|large)\/(?:\d{2,5}x\d{2,5}|w\d{2,5}|h\d{2,5})\//gi, "/")
+      .replace(/\/(?:w|h|width|height)[_-]?\d{2,5}(?:x\d{2,5})?\//gi, "/")
+      .replace(/\/(?:c_(?:fill|fit|crop|scale)|q_auto|f_auto|w_\d{2,5}|h_\d{2,5})(?:,[^/]*)*\//gi, "/")
+      .replace(/@(?:2x|3x)(?=\.(?:jpg|jpeg|png|webp|gif|avif)$)/i, "")
+      .replace(
+        /[_-](?:pico|icon|thumb|thumbnail|small|compact|medium|large|grande|master|\d{2,5}x\d{2,5}|\d{2,5}_\d{2,5}|w\d{2,5}|h\d{2,5}|x\d{2,5}|\d{2,5}x|\d{2,5}w|\d{2,5}h)(?=\.(?:jpg|jpeg|png|webp|gif|avif)$)/i,
+        ""
+      );
+  }
+
   function getImageDedupKey(url) {
-    return normalizeProductImageUrl(url)
-      .replace(/^https?:\/\//i, "")
-      .replace(/\?.*$/, "")
-      .toLowerCase();
+    const normalizedUrl = normalizeProductImageUrl(url);
+
+    try {
+      const parsedUrl = new URL(normalizedUrl);
+      return `${parsedUrl.hostname.replace(/^www\./i, "").toLowerCase()}${normalizeImageDedupPath(parsedUrl.pathname)}`;
+    } catch (error) {
+      return normalizedUrl
+        .replace(/^https?:\/\//i, "")
+        .replace(/\?.*$/, "")
+        .toLowerCase();
+    }
+  }
+
+  function getImageUrlQualityScore(url) {
+    const text = (() => {
+      try {
+        return decodeURIComponent(String(url || ""));
+      } catch (error) {
+        return String(url || "");
+      }
+    })().toLowerCase();
+    const sizeMatches = [
+      ...text.matchAll(/(?:^|[?&/_-])(?:width|w)=?(\d{2,5})(?:[&/_-]|$)/gi),
+      ...text.matchAll(/(?:^|[?&/_-])(?:height|h)=?(\d{2,5})(?:[&/_-]|$)/gi)
+    ];
+    const dimensionMatches = [...text.matchAll(/(\d{2,5})[x_](\d{2,5})/gi)];
+    const dimensionScore = dimensionMatches.reduce((score, match) => {
+      const width = Number(match[1] || 0);
+      const height = Number(match[2] || 0);
+      return Math.max(score, width * height);
+    }, 0);
+    const singleDimensionScore = sizeMatches.reduce((score, match) => {
+      const size = Number(match[1] || 0);
+      return Math.max(score, size * size);
+    }, 0);
+    const qualityBonus = /(?:master|original|full|large|hires|zoom)/i.test(text) ? 250000 : 0;
+    const thumbnailPenalty = /(?:thumb|thumbnail|pico|icon|small|compact)/i.test(text)
+      ? -250000
+      : 0;
+
+    return Math.max(dimensionScore, singleDimensionScore) + qualityBonus + thumbnailPenalty;
   }
 
   function parseSrcset(srcset) {
@@ -728,27 +799,36 @@
     return urls.filter(Boolean).map(normalizeProductImageUrl);
   }
 
-  function collectAmazonImagesFromScripts() {
+  function extractAmazonImageUrlsFromText(text) {
+    const urls = [];
+    const imageUrlPattern =
+      /https?:\\?\/\\?\/(?:m\.media-amazon\.com|images-na\.ssl-images-amazon\.com)\\?\/images\\?\/I\\?\/[^"'\s\\]+?\.(?:jpg|jpeg|png|webp)/gi;
+    let match = imageUrlPattern.exec(String(text || ""));
+
+    while (match) {
+      urls.push(match[0].replace(/\\\//g, "/").replace(/\\u002F/g, "/"));
+      match = imageUrlPattern.exec(String(text || ""));
+    }
+
+    return urls.map(normalizeProductImageUrl);
+  }
+
+  function getAmazonImageScriptTexts() {
     if (!/amazon\./i.test(window.location.hostname)) {
       return [];
     }
 
-    const urls = [];
-    const scriptTexts = Array.from(document.scripts)
-      .map((script) => script.textContent || "")
-      .filter((text) => text.includes("media-amazon.com/images/I/"));
-    const imageUrlPattern =
-      /https?:\\?\/\\?\/(?:m\.media-amazon\.com|images-na\.ssl-images-amazon\.com)\\?\/images\\?\/I\\?\/[^"'\s\\]+?\.(?:jpg|jpeg|png|webp)/gi;
+    if (!amazonImageScriptTextsCache) {
+      amazonImageScriptTextsCache = Array.from(document.scripts)
+        .map((script) => script.textContent || "")
+        .filter((text) => text.includes("media-amazon.com/images/I/"));
+    }
 
-    scriptTexts.forEach((text) => {
-      const matches = text.match(imageUrlPattern) || [];
+    return amazonImageScriptTextsCache;
+  }
 
-      matches.forEach((url) => {
-        urls.push(url.replace(/\\\//g, "/").replace(/\\u002F/g, "/"));
-      });
-    });
-
-    return urls.map(normalizeProductImageUrl);
+  function collectAmazonImagesFromScripts() {
+    return getAmazonImageScriptTexts().flatMap(extractAmazonImageUrlsFromText);
   }
 
   function getImageCandidateElements(root) {
@@ -779,6 +859,232 @@
       imageCount: urls.length,
       urls
     };
+  }
+
+  function getElementSignalText(element) {
+    return [
+      element?.id,
+      element?.className,
+      element?.getAttribute?.("role"),
+      element?.getAttribute?.("aria-label"),
+      element?.getAttribute?.("data-testid"),
+      element?.getAttribute?.("data-test")
+    ]
+      .map((value) => cleanText(String(value || "")))
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+  }
+
+  function isLikelyDecorativeImageElement(element) {
+    if (!element) {
+      return true;
+    }
+
+    const signalText = getElementSignalText(element);
+    const ancestorSignalText = getElementSignalText(
+      element.closest?.("header, footer, nav, aside, [role='banner'], [role='navigation']")
+    );
+    const blockedPattern =
+      /\b(logo|icon|sprite|avatar|payment|social|rating|star|trustpilot|review|reviews|footer|header|nav|menu|cart|account|search|newsletter|blog|article|post|member|membership|advertisement|recommend|related|upsell)\b/i;
+
+    if (blockedPattern.test(signalText) || blockedPattern.test(ancestorSignalText)) {
+      return true;
+    }
+
+    const rect = element.getBoundingClientRect?.();
+    const width = Math.max(Number(rect?.width || 0), Number(element.naturalWidth || 0));
+    const height = Math.max(Number(rect?.height || 0), Number(element.naturalHeight || 0));
+
+    return width > 0 && height > 0 && Math.max(width, height) < 42;
+  }
+
+  function getVisibleImageElements(root = document) {
+    return Array.from(root.querySelectorAll?.("img") || []).filter((element) => {
+      if (!element.isConnected || isLikelyDecorativeImageElement(element)) {
+        return false;
+      }
+
+      const urls = collectImageUrlsFromElement(element);
+
+      if (!urls.some((url) => isLikelyProductImage(url))) {
+        return false;
+      }
+
+      const rect = element.getBoundingClientRect?.();
+      const width = Math.max(Number(rect?.width || 0), Number(element.naturalWidth || 0));
+      const height = Math.max(Number(rect?.height || 0), Number(element.naturalHeight || 0));
+
+      return Math.max(width, height) >= 80;
+    });
+  }
+
+  function collectImageUrlsFromElements(elements) {
+    return uniqueImages(elements.flatMap(collectImageUrlsFromElement)).map((image) => image.url);
+  }
+
+  function scoreProductGalleryRoot(root) {
+    if (!root || root === document.body || root === document.documentElement) {
+      return null;
+    }
+
+    const imageElements = getVisibleImageElements(root);
+    const urls = collectImageUrlsFromElements(imageElements);
+
+    if (urls.length < 2) {
+      return null;
+    }
+
+    const rect = root.getBoundingClientRect?.();
+    const top = Number(rect?.top || 0);
+    const height = Number(rect?.height || 0);
+    const width = Number(rect?.width || 0);
+    const rootSignalText = getElementSignalText(root);
+    const imageArea = imageElements.reduce((sum, element) => {
+      const imageRect = element.getBoundingClientRect?.();
+      return sum + Number(imageRect?.width || 0) * Number(imageRect?.height || 0);
+    }, 0);
+    const largeImageCount = imageElements.filter((element) => {
+      const imageRect = element.getBoundingClientRect?.();
+      return Math.max(Number(imageRect?.width || 0), Number(imageRect?.height || 0)) >= 180;
+    }).length;
+    let score = urls.length * 8 + largeImageCount * 18 + Math.min(imageArea / 28000, 28);
+
+    if (/\b(product|gallery|media|image|photo|thumb|carousel|slider|swiper|shop|head|main)\b/i.test(rootSignalText)) {
+      score += 28;
+    }
+
+    if (/\b(recommend|related|upsell|cross|review|comment|blog|article|footer|header|nav|menu|cart|member|membership|advertisement|banner)\b/i.test(rootSignalText)) {
+      score -= 48;
+    }
+
+    if (top >= 0 && top < Math.max(window.innerHeight || 0, 720) * 1.6) {
+      score += 24;
+    } else if (top > Math.max(window.innerHeight || 0, 720) * 2.5) {
+      score -= 40;
+    }
+
+    if (height > 0 && width > 0 && height * width > 0) {
+      score += Math.min((height * width) / 45000, 16);
+    }
+
+    if (urls.length > 60) {
+      score -= 50;
+    }
+
+    return { root, urls, score };
+  }
+
+  function getAncestorGalleryCandidates(imageElement) {
+    const candidates = [];
+    let current = imageElement?.parentElement;
+    let depth = 0;
+
+    while (current && current !== document.body && depth < 8) {
+      const imageCount = current.querySelectorAll?.("img")?.length || 0;
+
+      if (imageCount >= 2) {
+        candidates.push(current);
+      }
+
+      current = current.parentElement;
+      depth += 1;
+    }
+
+    return candidates;
+  }
+
+  function collectPrimaryGalleryImageUrls() {
+    const scoredCandidates = [];
+    const seenRoots = new Set();
+    const strongSelectors = [
+      "[data-testid*='gallery' i]",
+      "[data-test*='gallery' i]",
+      "[class*='product'][class*='gallery']",
+      "[class*='product'][class*='media']",
+      "[class*='product'][class*='image']",
+      "[class*='product'][class*='photo']",
+      "[class*='product'][class*='thumb']",
+      "[class*='gallery'][class*='product']",
+      "[class*='media'][class*='product']",
+      "[class*='shop-head'][class*='left']",
+      "[class*='shop-head'][class*='media']"
+    ];
+
+    function addCandidate(root) {
+      if (!root || seenRoots.has(root)) {
+        return;
+      }
+
+      seenRoots.add(root);
+      const scored = scoreProductGalleryRoot(root);
+
+      if (scored) {
+        scoredCandidates.push(scored);
+      }
+    }
+
+    strongSelectors.forEach((selector) => {
+      document.querySelectorAll(selector).forEach(addCandidate);
+    });
+
+    getVisibleImageElements(document)
+      .slice(0, 160)
+      .forEach((imageElement) => {
+        getAncestorGalleryCandidates(imageElement).forEach(addCandidate);
+      });
+
+    scoredCandidates.sort((left, right) => right.score - left.score);
+
+    const best = scoredCandidates[0];
+
+    return best && best.score >= 38
+      ? {
+          urls: best.urls,
+          selector: getImageAreaSelectorFromTarget(best.root),
+          score: best.score
+        }
+      : {
+          urls: [],
+          selector: "",
+          score: 0
+        };
+  }
+
+  function collectFallbackDomImageUrls() {
+    const selectorGroups = [
+      [
+        "[data-testid*='product' i] img",
+        "[data-test*='product' i] img",
+        "[class*='product'][class*='gallery'] img",
+        "[class*='product'][class*='media'] img",
+        "[class*='product'][class*='image'] img",
+        "[class*='product'][class*='thumb'] img"
+      ],
+      ["main picture source", "main img"],
+      ["picture source", "img"]
+    ];
+    let broadFallbackUrls = [];
+
+    for (const selectorGroup of selectorGroups) {
+      const elements = selectorGroup.flatMap((selector) =>
+        Array.from(document.querySelectorAll(selector))
+      );
+      const filteredElements = elements.filter((element) =>
+        element.matches?.("img") ? !isLikelyDecorativeImageElement(element) : true
+      );
+      const urls = collectImageUrlsFromElements(filteredElements);
+
+      if (selectorGroup.includes("img")) {
+        broadFallbackUrls = urls;
+      }
+
+      if (urls.length >= 2 && !selectorGroup.includes("img")) {
+        return urls;
+      }
+    }
+
+    return broadFallbackUrls;
   }
 
   function inspectImagesFromSelector(selector) {
@@ -1405,26 +1711,39 @@
 
   function uniqueImages(urls) {
     const seen = new Set();
+    const indexesByKey = new Map();
     const output = [];
 
     for (const url of urls) {
       const absoluteUrl = normalizeProductImageUrl(url);
       const dedupKey = getImageDedupKey(absoluteUrl);
 
-      if (!isLikelyProductImage(absoluteUrl) || seen.has(dedupKey)) {
+      if (!isLikelyProductImage(absoluteUrl)) {
+        continue;
+      }
+
+      if (seen.has(dedupKey)) {
+        const existingIndex = indexesByKey.get(dedupKey);
+        const existingImage = output[existingIndex];
+
+        if (
+          existingImage &&
+          getImageUrlQualityScore(absoluteUrl) > getImageUrlQualityScore(existingImage.url)
+        ) {
+          existingImage.url = absoluteUrl;
+        }
+
         continue;
       }
 
       seen.add(dedupKey);
+      indexesByKey.set(dedupKey, output.length);
       output.push({
         url: absoluteUrl,
         position: output.length + 1,
         altText: ""
       });
 
-      if (output.length >= MAX_IMAGE_COUNT) {
-        break;
-      }
     }
 
     return output;
@@ -1919,55 +2238,157 @@
     return normalizeProductImageUrl(value.src || value.url || value.originalSrc || value.image);
   }
 
+  function getCurrentShopifyVariantId() {
+    try {
+      return new URL(window.location.href).searchParams.get("variant") || "";
+    } catch (error) {
+      return "";
+    }
+  }
+
+  function getShopifySelectedVariant(product) {
+    const variants = Array.isArray(product?.variants) ? product.variants : [];
+
+    if (!variants.length) {
+      return null;
+    }
+
+    const variantId = getCurrentShopifyVariantId();
+
+    if (variantId) {
+      const matchedVariant = variants.find((variant) => String(variant.id || "") === variantId);
+
+      if (matchedVariant) {
+        return matchedVariant;
+      }
+    }
+
+    return variants.find((variant) => variant.available !== false) || variants[0] || null;
+  }
+
   function collectShopifyImages(product) {
-    const images = normalizeImageValue(product?.images || product?.image);
-    const variantImages = (Array.isArray(product?.variants) ? product.variants : [])
+    const productImages = normalizeImageValue(product?.images || product?.image);
+    const variants = Array.isArray(product?.variants) ? product.variants : [];
+    const selectedVariant = getShopifySelectedVariant(product);
+    const selectedVariantImage = getShopifyImageUrl(
+      selectedVariant?.featured_image || selectedVariant?.image
+    );
+    const variantImages = variants
       .map((variant) => getShopifyImageUrl(variant.featured_image || variant.image))
       .filter(Boolean);
 
-    return uniqueImages([...images, ...variantImages]).map((image) => image.url);
+    return uniqueImages([selectedVariantImage, ...variantImages, ...productImages]).map(
+      (image) => image.url
+    );
   }
 
-  function getShopifyAjaxProductUrl() {
+  function getShopifyAjaxProductUrlsForBase(baseUrl) {
+    return [`${baseUrl}.js`, `${baseUrl}.json`];
+  }
+
+  function getShopifyProductLinkInfo(href) {
+    let url;
+
+    try {
+      url = new URL(href, window.location.origin);
+    } catch (error) {
+      return null;
+    }
+
+    if (url.origin !== window.location.origin) {
+      return null;
+    }
+
+    const match = url.pathname.match(/^(.*\/products\/)([^/?#/.]+)(?:\.[^/?#]+)?/i);
+
+    if (!match) {
+      return null;
+    }
+
+    return {
+      handle: cleanText(match[2]).toLowerCase(),
+      baseUrl: `${url.origin}${match[1]}${match[2]}`
+    };
+  }
+
+  function getShopifyAjaxProductUrls() {
     const match = window.location.pathname.match(/^(.*\/products\/)([^/?#/.]+)(?:\.[^/?#]+)?/i);
 
     if (!match || /amazon\./i.test(window.location.hostname)) {
-      return "";
+      return [];
     }
 
-    return `${window.location.origin}${match[1]}${match[2]}.js`;
+    const baseUrl = `${window.location.origin}${match[1]}${match[2]}`;
+
+    return getShopifyAjaxProductUrlsForBase(baseUrl);
+  }
+
+  function normalizeShopifyAjaxProductResponse(response) {
+    const product = response?.product && typeof response.product === "object"
+      ? response.product
+      : response;
+
+    return product && Array.isArray(product.variants) && product.variants.length
+      ? product
+      : null;
+  }
+
+  async function fetchShopifyProductFromUrls(urls = []) {
+    if (!urls.length) {
+      return null;
+    }
+
+    for (const url of urls) {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 5500);
+
+      try {
+        const response = await fetch(url, {
+          credentials: "same-origin",
+          headers: {
+            Accept: "application/json"
+          },
+          signal: controller.signal
+        });
+
+        if (!response.ok) {
+          continue;
+        }
+
+        const product = normalizeShopifyAjaxProductResponse(await response.json());
+
+        if (product) {
+          return product;
+        }
+      } catch (error) {
+        continue;
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    }
+
+    return null;
   }
 
   async function fetchShopifyAjaxProduct() {
-    const url = getShopifyAjaxProductUrl();
+    return fetchShopifyProductFromUrls(getShopifyAjaxProductUrls());
+  }
 
-    if (!url) {
+  async function fetchShopifyProductByLinkInfo(linkInfo) {
+    if (!linkInfo?.baseUrl) {
       return null;
     }
 
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 5500);
+    const product = await fetchShopifyProductFromUrls(
+      getShopifyAjaxProductUrlsForBase(linkInfo.baseUrl)
+    );
 
-    try {
-      const response = await fetch(url, {
-        credentials: "same-origin",
-        headers: {
-          Accept: "application/json"
-        },
-        signal: controller.signal
-      });
-
-      if (!response.ok) {
-        return null;
-      }
-
-      const product = await response.json();
-      return product && Array.isArray(product.variants) ? product : null;
-    } catch (error) {
-      return null;
-    } finally {
-      window.clearTimeout(timeout);
-    }
+    return product
+      ? {
+          ...product,
+          handle: getProductHandle(product) || linkInfo.handle
+        }
+      : null;
   }
 
   function getShopifyOptionName(product, index) {
@@ -2005,6 +2426,390 @@
     return "";
   }
 
+  function normalizeShopifySiblingTitleTokens(title) {
+    const stopWords = new Set([
+      "a",
+      "an",
+      "and",
+      "the",
+      "with",
+      "for",
+      "mini",
+      "jumbo",
+      "full",
+      "fullsize",
+      "full-size",
+      "travel",
+      "size",
+      "sized"
+    ]);
+
+    return cleanText(title)
+      .toLowerCase()
+      .replace(/\b\d+(?:\.\d+)?\s*(?:ml|mL|l|oz|fl\s*oz|g|kg|ct|count|pack|packs|pc|pcs)\b/gi, " ")
+      .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, " ")
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length > 1 && !stopWords.has(token));
+  }
+
+  function getShopifySiblingTitleSimilarity(baseTitle, candidateTitle) {
+    const baseTokens = normalizeShopifySiblingTitleTokens(baseTitle);
+    const candidateTokens = normalizeShopifySiblingTitleTokens(candidateTitle);
+
+    if (!baseTokens.length || !candidateTokens.length) {
+      return { score: 0, sharedCount: 0, baseCount: baseTokens.length };
+    }
+
+    const candidateSet = new Set(candidateTokens);
+    const sharedCount = [...new Set(baseTokens)].filter((token) => candidateSet.has(token)).length;
+    const score = sharedCount / Math.max(baseTokens.length, candidateTokens.length);
+
+    return { score, sharedCount, baseCount: baseTokens.length };
+  }
+
+  function isLikelyShopifySiblingProduct(baseProduct, candidateProduct) {
+    const baseHandle = getProductHandle(baseProduct).toLowerCase();
+    const candidateHandle = getProductHandle(candidateProduct).toLowerCase();
+
+    if (!candidateProduct || !candidateHandle || candidateHandle === baseHandle) {
+      return true;
+    }
+
+    if (isBlockedShopifySiblingProduct(baseProduct, candidateProduct)) {
+      return false;
+    }
+
+    const { score, sharedCount, baseCount } = getShopifySiblingTitleSimilarity(
+      baseProduct?.title || baseProduct?.name,
+      candidateProduct?.title || candidateProduct?.name
+    );
+
+    return score >= 0.58 && sharedCount >= Math.min(3, baseCount);
+  }
+
+  function isBlockedShopifySiblingProduct(baseProduct, candidateProduct) {
+    const baseTitle = cleanText(baseProduct?.title || baseProduct?.name);
+    const candidateTitle = cleanText(candidateProduct?.title || candidateProduct?.name);
+    const samplePattern = /\b(sample|deluxe\s+sample|gift|free|trial|tester)\b/i;
+    const firstVariant = Array.isArray(candidateProduct?.variants)
+      ? candidateProduct.variants[0]
+      : null;
+    const candidatePrice = Number(formatShopifyMoney(firstVariant?.price, true));
+    const baseIsSample = samplePattern.test(baseTitle);
+    const candidateIsSample = samplePattern.test(candidateTitle);
+
+    if (candidateIsSample && !baseIsSample) {
+      return true;
+    }
+
+    if (candidatePrice === 0 && !baseIsSample) {
+      return true;
+    }
+
+    return false;
+  }
+
+  function extractShopifySizeValue(text) {
+    const match = cleanText(text).match(
+      /\b\d+(?:\.\d+)?\s*(?:mL|ml|L|l|fl\s*oz|oz|g|kg|ct|count|pack|packs|pc|pcs)\b/
+    );
+
+    return match ? cleanText(match[0]).replace(/\bml\b/i, "mL") : "";
+  }
+
+  function getShopifySiblingOptionValue(product, index) {
+    const firstVariant = Array.isArray(product?.variants) ? product.variants[0] : null;
+    const directValue = getShopifyVariantValue(firstVariant, product, 0);
+    const titleValue = extractShopifySizeValue(product?.title || product?.name);
+
+    if (directValue && !/^default title$/i.test(directValue)) {
+      return directValue;
+    }
+
+    if (titleValue) {
+      return titleValue;
+    }
+
+    return deriveVariantValue(
+      product?.title || product?.name,
+      firstVariant?.title || firstVariant?.name,
+      `Variant ${index + 1}`
+    );
+  }
+
+  function getShopifySiblingOptionName(values) {
+    return values.length && values.every((value) => extractShopifySizeValue(value))
+      ? "Size"
+      : "Option";
+  }
+
+  function getShopifySiblingMergedTitle(product) {
+    const title = cleanText(product?.title || product?.name)
+      .replace(/^\s*(mini|jumbo|full[-\s]?size|travel[-\s]?size)\s+/i, "")
+      .replace(/\s+\d+(?:\.\d+)?\s*(?:mL|ml|L|l|fl\s*oz|oz|g|kg|ct|count|pack|packs|pc|pcs)\s*$/i, "")
+      .trim();
+
+    return title.length >= 8 ? title : cleanText(product?.title || product?.name);
+  }
+
+  function getShopifySiblingSizeSortValue(value) {
+    const match = cleanText(value).match(
+      /(\d+(?:\.\d+)?)\s*(mL|ml|L|l|fl\s*oz|oz|g|kg|ct|count|pack|packs|pc|pcs)\b/
+    );
+
+    if (!match) {
+      return Number.POSITIVE_INFINITY;
+    }
+
+    const number = Number(match[1]);
+    const unit = match[2].toLowerCase().replace(/\s+/g, "");
+    const multipliers = {
+      l: 1000,
+      ml: 1,
+      floz: 29.5735,
+      oz: 28.3495,
+      kg: 1000,
+      g: 1,
+      ct: 1,
+      count: 1,
+      pack: 1,
+      packs: 1,
+      pc: 1,
+      pcs: 1
+    };
+
+    return Number.isFinite(number) ? number * (multipliers[unit] || 1) : Number.POSITIVE_INFINITY;
+  }
+
+  function addShopifySiblingLinkCandidate(links, seen, href, source = "dom") {
+    const normalizedHref = String(href || "")
+      .replace(/\\u002F/g, "/")
+      .replace(/\\\//g, "/")
+      .replace(/&amp;/g, "&")
+      .trim();
+    const linkInfo = getShopifyProductLinkInfo(normalizedHref);
+
+    if (!linkInfo || !linkInfo.handle || seen.has(linkInfo.handle)) {
+      return;
+    }
+
+    if (/^(?:products?|collections?|pages?|blogs?|cart|search|account)$/i.test(linkInfo.handle)) {
+      return;
+    }
+
+    seen.add(linkInfo.handle);
+    links.push({
+      ...linkInfo,
+      source
+    });
+  }
+
+  function collectShopifySiblingLinksFromAttributes(links, seen) {
+    const attributes = [
+      "href",
+      "data-url",
+      "data-href",
+      "data-product-url",
+      "data-product-handle",
+      "data-handle",
+      "data-product"
+    ];
+
+    document.querySelectorAll(attributes.map((attribute) => `[${attribute}]`).join(",")).forEach((element) => {
+      attributes.forEach((attribute) => {
+        const value = element.getAttribute?.(attribute);
+
+        if (!value) {
+          return;
+        }
+
+        if (attribute.includes("handle") && !/\/products\//i.test(value)) {
+          addShopifySiblingLinkCandidate(links, seen, `/products/${value}`, `attr:${attribute}`);
+          return;
+        }
+
+        if (/\/products\//i.test(value)) {
+          addShopifySiblingLinkCandidate(links, seen, value, `attr:${attribute}`);
+        }
+      });
+    });
+  }
+
+  function collectShopifySiblingLinksFromText(links, seen, text, source) {
+    const sourceText = String(text || "");
+    const patterns = [
+      /https?:\\?\/\\?\/[^"'<>\s\\]+?\\?\/products\\?\/[a-z0-9][a-z0-9-]*(?:\?variant=\d+)?(?=[/?#"'\\\s<>&]|$)/gi,
+      /(?:\\u002F|\\\/|\/)products(?:\\u002F|\\\/|\/)[a-z0-9][a-z0-9-]*(?:\?variant=\d+)?(?=[/?#"'\\\s<>&]|$)/gi
+    ];
+
+    patterns.forEach((pattern) => {
+      let match = pattern.exec(sourceText);
+
+      while (match) {
+        addShopifySiblingLinkCandidate(links, seen, match[0], source);
+        match = pattern.exec(sourceText);
+      }
+
+      pattern.lastIndex = 0;
+    });
+  }
+
+  function getShopifySiblingLinkScore(linkInfo, baseProduct) {
+    const currentHandle = getCurrentProductHandle();
+    let score = 0;
+
+    if (linkInfo.handle === currentHandle) {
+      score += 100;
+    }
+
+    if (/attr:href|html|script/i.test(linkInfo.source || "")) {
+      score += 8;
+    }
+
+    const titleTokens = normalizeShopifySiblingTitleTokens(baseProduct?.title || baseProduct?.name);
+
+    titleTokens.forEach((token) => {
+      if (linkInfo.handle.includes(token)) {
+        score += 6;
+      }
+    });
+
+    if (extractShopifySizeValue(linkInfo.handle.replace(/-/g, " "))) {
+      score += 10;
+    }
+
+    return score;
+  }
+
+  function collectShopifySiblingProductLinks() {
+    const seen = new Set();
+    const links = [];
+
+    collectShopifySiblingLinksFromAttributes(links, seen);
+    collectShopifySiblingLinksFromText(
+      links,
+      seen,
+      document.documentElement?.innerHTML || "",
+      "html"
+    );
+    Array.from(document.scripts || []).forEach((script) => {
+      collectShopifySiblingLinksFromText(links, seen, script.textContent || "", "script");
+    });
+
+    return links;
+  }
+
+  async function collectShopifySiblingProducts(baseProduct) {
+    if (!baseProduct || !Array.isArray(baseProduct.variants) || baseProduct.variants.length !== 1) {
+      return [];
+    }
+
+    const currentHandle = getCurrentProductHandle();
+    const siblingProducts = [baseProduct];
+    const seenHandles = new Set([
+      getProductHandle(baseProduct).toLowerCase() || currentHandle
+    ].filter(Boolean));
+    const links = collectShopifySiblingProductLinks()
+      .sort(
+        (left, right) =>
+          getShopifySiblingLinkScore(right, baseProduct) -
+          getShopifySiblingLinkScore(left, baseProduct)
+      );
+
+    for (const linkInfo of links) {
+      if (seenHandles.has(linkInfo.handle)) {
+        continue;
+      }
+
+      const product =
+        linkInfo.handle === currentHandle
+          ? baseProduct
+          : await fetchShopifyProductByLinkInfo(linkInfo);
+
+      if (!product || !Array.isArray(product.variants) || product.variants.length !== 1) {
+        continue;
+      }
+
+      if (!isLikelyShopifySiblingProduct(baseProduct, product)) {
+        continue;
+      }
+
+      seenHandles.add(linkInfo.handle);
+      siblingProducts.push(product);
+    }
+
+    return siblingProducts;
+  }
+
+  async function maybeMergeShopifySiblingProducts(baseProduct) {
+    const siblingProducts = await collectShopifySiblingProducts(baseProduct);
+
+    if (siblingProducts.length < 2) {
+      return baseProduct;
+    }
+
+    const optionValues = siblingProducts.map((product, index) =>
+      getShopifySiblingOptionValue(product, index)
+    );
+    const optionName = getShopifySiblingOptionName(optionValues);
+    const seenValues = new Set();
+    const mergedProducts = siblingProducts
+      .map((product, index) => ({
+        product,
+        optionValue: optionValues[index]
+      }))
+      .filter((item) => {
+        const key = cleanText(item.optionValue).toLowerCase();
+
+        if (!key || seenValues.has(key)) {
+          return false;
+        }
+
+        seenValues.add(key);
+        return true;
+      })
+      .sort((left, right) => {
+        const leftSize = getShopifySiblingSizeSortValue(left.optionValue);
+        const rightSize = getShopifySiblingSizeSortValue(right.optionValue);
+
+        if (leftSize !== rightSize) {
+          return leftSize - rightSize;
+        }
+
+        return 0;
+      });
+
+    if (mergedProducts.length < 2) {
+      return baseProduct;
+    }
+
+    return {
+      ...baseProduct,
+      title: getShopifySiblingMergedTitle(baseProduct),
+      variants: mergedProducts.map(({ product, optionValue }) => {
+        const variant = product.variants[0] || {};
+        const imageUrl = collectShopifyImages(product)[0] || "";
+
+        return {
+          ...variant,
+          title: optionValue,
+          option1: optionValue,
+          options: [optionValue],
+          featured_image: imageUrl || variant.featured_image || variant.image,
+          image: imageUrl || variant.image || variant.featured_image
+        };
+      }),
+      options: [
+        {
+          name: optionName,
+          values: mergedProducts.map((item) => item.optionValue)
+        }
+      ],
+      __spcSiblingProductVariants: true
+    };
+  }
+
   function normalizeShopifyVariant(variant, product, index, variantCount) {
     const option1Value = getShopifyVariantValue(variant, product, 0);
     const isDefaultOnly =
@@ -2035,7 +2840,6 @@
 
   function normalizeShopifyProductObject(product, source = "shopify") {
     const variants = product.variants
-      .slice(0, MAX_VARIANT_COUNT)
       .map((variant, index) =>
         normalizeShopifyVariant(variant, product, index, product.variants.length)
       );
@@ -2069,7 +2873,15 @@
     const ajaxProduct = await fetchShopifyAjaxProduct();
 
     if (ajaxProduct) {
-      return normalizeShopifyProductObject(ajaxProduct, "shopify-api");
+      const mergedProduct = await maybeMergeShopifySiblingProducts(ajaxProduct);
+      const normalizedProduct = normalizeShopifyProductObject(mergedProduct, "shopify-api");
+
+      if (mergedProduct.__spcSiblingProductVariants) {
+        normalizedProduct.images = collectShopifyImages(ajaxProduct);
+        normalizedProduct.source = "shopify-api";
+      }
+
+      return normalizedProduct;
     }
 
     const candidates = collectProductObjectsFromScripts()
@@ -2185,40 +2997,81 @@
   }
 
   function getDomOptionPriceInfo(element) {
-    const priceText =
-      element.querySelector?.("[data-variant-subscription-price]")?.textContent ||
-      element.querySelector?.("[data-subscription-price], [data-selling-plan-price]")?.textContent ||
-      element.querySelector?.("[class*='subscription'][class*='price'], [class*='selling'][class*='price']")?.textContent ||
-      element.querySelector?.("[data-price], [data-current-price], [data-sale-price]")?.textContent ||
-      element.getAttribute?.("data-subscription-price") ||
-      element.getAttribute?.("data-selling-plan-price") ||
-      element.getAttribute?.("data-price") ||
-      "";
-    const priceCents =
-      element.getAttribute?.("data-subscription-line-cents") ||
-      element.getAttribute?.("data-subscription-price-cents") ||
-      element.getAttribute?.("data-selling-plan-price-cents") ||
-      element.getAttribute?.("data-price-cents") ||
-      "";
-    const compareText =
-      element.querySelector?.("[data-variant-compare]")?.textContent ||
-      element.querySelector?.("[data-subscription-compare], [data-selling-plan-compare]")?.textContent ||
-      element.querySelector?.("[data-compare-at-price], [data-compare-price]")?.textContent ||
-      element.getAttribute?.("data-subscription-compare") ||
-      element.getAttribute?.("data-selling-plan-compare") ||
-      element.getAttribute?.("data-compare-at-price") ||
-      "";
-    const compareCents =
-      element.getAttribute?.("data-subscription-compare-cents") ||
-      element.getAttribute?.("data-selling-plan-compare-cents") ||
-      element.getAttribute?.("data-compare-at-price-cents") ||
-      "";
+    const text = cleanText(element?.innerText || element?.textContent || "");
+    const priceValues = [
+      ...collectMoneyValuesFromAttributes(element, [
+        "data-variant-price",
+        "data-variant-subscription-price",
+        "data-subscription-price",
+        "data-selling-plan-price",
+        "data-price",
+        "data-current-price",
+        "data-sale-price"
+      ]),
+      ...collectMoneyValuesFromAttributes(element, [
+        "data-subscription-line-cents",
+        "data-subscription-price-cents",
+        "data-selling-plan-price-cents",
+        "data-price-cents"
+      ], true),
+      ...collectMoneyValuesFromSelectors(element, [
+        "[data-variant-price]",
+        "[data-variant-subscription-price]",
+        "[data-subscription-price]",
+        "[data-selling-plan-price]",
+        "[data-price]",
+        "[data-current-price]",
+        "[data-sale-price]",
+        "[class*='subscription'][class*='price']",
+        "[class*='selling'][class*='price']",
+        "[class*='current'][class*='price']",
+        "[class*='sale'][class*='price']"
+      ]),
+      ...extractLabeledMoneyValues(text, getCurrentPriceLabelPattern())
+    ];
+    const compareValues = [
+      ...collectMoneyValuesFromAttributes(element, [
+        "data-variant-compare",
+        "data-subscription-compare",
+        "data-selling-plan-compare",
+        "data-compare-at-price",
+        "data-compare-price",
+        "data-original-price",
+        "data-was-price"
+      ]),
+      ...collectMoneyValuesFromAttributes(element, [
+        "data-subscription-compare-cents",
+        "data-selling-plan-compare-cents",
+        "data-compare-at-price-cents",
+        "data-compare-price-cents"
+      ], true),
+      ...collectMoneyValuesFromSelectors(element, [
+        "[data-variant-compare]",
+        "[data-subscription-compare]",
+        "[data-selling-plan-compare]",
+        "[data-compare-at-price]",
+        "[data-compare-price]",
+        "[data-original-price]",
+        "[data-was-price]",
+        ".compare-at-price",
+        ".compare-price",
+        ".was-price",
+        ".original-price",
+        ".regular-price",
+        ".price--compare",
+        ".price__compare",
+        ".price-item--regular",
+        "s",
+        "del"
+      ]),
+      ...extractLabeledMoneyValues(text, getComparePriceLabelPattern())
+    ];
 
-    return {
-      price: formatShopifyMoney(priceText) || formatShopifyMoney(priceCents, true),
-      compareAtPrice:
-        formatShopifyMoney(compareText) || formatShopifyMoney(compareCents, true)
-    };
+    return getPriceInfoFromMoneyValues(
+      priceValues,
+      compareValues,
+      extractMoneyValues(text)
+    );
   }
 
   function getDomGroupLabel(group, index) {
@@ -2385,10 +3238,6 @@
     const variants = [];
 
     function visit(groupIndex, selected) {
-      if (variants.length >= MAX_VARIANT_COUNT) {
-        return;
-      }
-
       if (groupIndex >= groups.length) {
         const priceOption = [...selected].reverse().find((option) => option.price);
         const compareOption = [...selected].reverse().find((option) => option.compareAtPrice);
@@ -2609,13 +3458,34 @@
     return images;
   }
 
-  function extractRuleMoneyValues(value) {
-    const matches = String(value || "").match(/(?:[$€£¥]\s*)?\d[\d,.]*(?:\.\d{2})?/g) || [];
+  function getCurrentPriceLabelPattern() {
+    return /(?:sale|now|current|today|price|subscribe|subscription|one-time|deal|售价|现价|当前价|订阅价)/i;
+  }
+
+  function getComparePriceLabelPattern() {
+    return /(?:compare|was|original|regular|list|retail|msrp|before|strike|strikethrough|原价|划线价|对比价|市场价|零售价)/i;
+  }
+
+  function stripUnitPriceText(value) {
+    return String(value || "")
+      .replace(
+        /\([^)]*(?:\/|per\s+|ounce|ounces|oz|fl\s*oz|ml|g|kg|lb|lbs|count|ct|unit|each)[^)]*\)/gi,
+        " "
+      )
+      .replace(
+        /[$€£¥]\s*\d[\d,.]*\s*(?:\/|\bper\b)\s*(?:ounce|ounces|oz|fl\s*oz|ml|g|kg|lb|lbs|count|ct|unit|each)\b/gi,
+        " "
+      );
+  }
+
+  function extractMoneyValues(value) {
+    const text = stripUnitPriceText(value);
+    const matches = text.match(/(?:[$€£¥]\s*)?\d[\d,.]*(?:\.\d{1,2})?/g) || [];
     const values = [];
     const seen = new Set();
 
     matches.forEach((match) => {
-      if (!/[$€£¥]/.test(match) && !/\.\d{2}$/.test(match)) {
+      if (!/[$€£¥]/.test(match) && !/[.,]\d{1,2}$/.test(match)) {
         return;
       }
 
@@ -2632,51 +3502,155 @@
     return values;
   }
 
+  function uniqueMoneyValues(values = []) {
+    const seen = new Set();
+
+    return values
+      .map((value) => normalizePrice(value))
+      .filter((value) => {
+        if (!value || seen.has(value)) {
+          return false;
+        }
+
+        seen.add(value);
+        return true;
+      });
+  }
+
+  function collectMoneyValuesFromAttributes(element, attributes = [], isCents = false) {
+    return attributes.flatMap((attribute) => {
+      const value = element?.getAttribute?.(attribute);
+
+      if (!value) {
+        return [];
+      }
+
+      if (isCents || /cents/i.test(attribute)) {
+        return [formatShopifyMoney(value, true)].filter(Boolean);
+      }
+
+      return extractMoneyValues(value);
+    });
+  }
+
+  function collectMoneyValuesFromSelectors(element, selectors = []) {
+    return selectors.flatMap((selector) =>
+      Array.from(element?.querySelectorAll?.(selector) || [])
+        .slice(0, 6)
+        .flatMap((node) => extractMoneyValues(node.textContent || ""))
+    );
+  }
+
+  function extractLabeledMoneyValues(text, labelPattern) {
+    return String(text || "")
+      .split(/[\n\r|•]+/)
+      .filter((part) => labelPattern.test(part))
+      .flatMap(extractMoneyValues);
+  }
+
+  function getPriceInfoFromMoneyValues(priceValues = [], compareValues = [], fallbackValues = []) {
+    const currentPrices = uniqueMoneyValues(priceValues);
+    const comparePrices = uniqueMoneyValues(compareValues);
+    const fallbackPrices = uniqueMoneyValues(fallbackValues);
+    let price = currentPrices[0] || fallbackPrices[0] || "";
+    let compareAtPrice =
+      comparePrices.find((candidate) => candidate !== price) ||
+      fallbackPrices.find((candidate) => candidate !== price) ||
+      "";
+
+    const priceNumber = Number(price);
+    const compareNumber = Number(compareAtPrice);
+
+    if (
+      price &&
+      compareAtPrice &&
+      Number.isFinite(priceNumber) &&
+      Number.isFinite(compareNumber) &&
+      priceNumber > compareNumber
+    ) {
+      [price, compareAtPrice] = [compareAtPrice, price];
+    }
+
+    return { price, compareAtPrice };
+  }
+
+  function extractRuleMoneyValues(value) {
+    return extractMoneyValues(value);
+  }
+
   function getRuleVariantItemText(element) {
     return cleanText(element?.innerText || element?.textContent || "");
   }
 
   function getRuleVariantPriceInfo(element) {
-    const attributeValues = [
-      element.getAttribute?.("data-price"),
-      element.getAttribute?.("data-current-price"),
-      element.getAttribute?.("data-sale-price"),
-      element.getAttribute?.("data-product-price"),
-      element.getAttribute?.("data-compare-at-price"),
-      element.getAttribute?.("data-compare-price"),
-      element.getAttribute?.("data-original-price")
+    const text = getRuleVariantItemText(element);
+    const priceValues = [
+      ...collectMoneyValuesFromAttributes(element, [
+        "data-price",
+        "data-current-price",
+        "data-sale-price",
+        "data-product-price",
+        "data-variant-price"
+      ]),
+      ...collectMoneyValuesFromAttributes(element, [
+        "data-price-cents",
+        "data-current-price-cents",
+        "data-sale-price-cents",
+        "data-product-price-cents",
+        "data-variant-price-cents"
+      ], true),
+      ...collectMoneyValuesFromSelectors(element, [
+        "[data-price]",
+        "[data-current-price]",
+        "[data-sale-price]",
+        "[data-product-price]",
+        "[data-variant-price]",
+        ".current-price",
+        ".sale-price",
+        ".price__sale",
+        ".price-item--sale"
+      ]),
+      ...extractLabeledMoneyValues(text, getCurrentPriceLabelPattern())
     ];
-    const textValues = [
-      element.querySelector?.("[data-price], [data-current-price], [data-sale-price]")?.textContent,
-      element.querySelector?.("[data-compare-at-price], [data-compare-price], [data-original-price]")?.textContent,
-      getRuleVariantItemText(element)
+    const compareValues = [
+      ...collectMoneyValuesFromAttributes(element, [
+        "data-compare-at-price",
+        "data-compare-price",
+        "data-original-price",
+        "data-was-price",
+        "data-list-price"
+      ]),
+      ...collectMoneyValuesFromAttributes(element, [
+        "data-compare-at-price-cents",
+        "data-compare-price-cents",
+        "data-original-price-cents",
+        "data-was-price-cents",
+        "data-list-price-cents"
+      ], true),
+      ...collectMoneyValuesFromSelectors(element, [
+        "[data-compare-at-price]",
+        "[data-compare-price]",
+        "[data-original-price]",
+        "[data-was-price]",
+        "[data-list-price]",
+        ".compare-at-price",
+        ".compare-price",
+        ".was-price",
+        ".original-price",
+        ".regular-price",
+        ".price__regular",
+        ".price-item--regular",
+        "s",
+        "del"
+      ]),
+      ...extractLabeledMoneyValues(text, getComparePriceLabelPattern())
     ];
-    const prices = [...attributeValues, ...textValues].flatMap(extractRuleMoneyValues);
-    const uniquePrices = [...new Set(prices)];
-    const firstPrice = uniquePrices[0] || "";
-    const secondPrice = uniquePrices[1] || "";
 
-    if (!firstPrice || !secondPrice) {
-      return {
-        price: firstPrice,
-        compareAtPrice: secondPrice
-      };
-    }
-
-    const firstNumber = Number(firstPrice);
-    const secondNumber = Number(secondPrice);
-
-    if (Number.isFinite(firstNumber) && Number.isFinite(secondNumber) && firstNumber > secondNumber) {
-      return {
-        price: secondPrice,
-        compareAtPrice: firstPrice
-      };
-    }
-
-    return {
-      price: firstPrice,
-      compareAtPrice: secondPrice
-    };
+    return getPriceInfoFromMoneyValues(
+      priceValues,
+      compareValues,
+      extractRuleMoneyValues(text)
+    );
   }
 
   function cleanRuleVariantLabelCandidate(value) {
@@ -2834,7 +3808,7 @@
 
     const optionName = getDomGroupLabel(root, 0) || "Option";
 
-    return items.slice(0, MAX_VARIANT_COUNT).map((item, index) => {
+    return items.map((item, index) => {
       const priceInfo = getRuleVariantPriceInfo(item);
 
       return {
@@ -2909,7 +3883,7 @@
       variants.push(...collectRuleVariantsFromControls(root));
     });
 
-    return dedupeRuleVariants(variants).slice(0, MAX_VARIANT_COUNT);
+    return dedupeRuleVariants(variants);
   }
 
   function collectSiteRuleProduct(rule, source = "site-rule") {
@@ -3085,16 +4059,340 @@
       .trim();
   }
 
+  function isPriceOnlyAmazonVariantValue(value) {
+    const text = cleanText(value);
+
+    return (
+      Boolean(text) &&
+      /[$€£¥]/.test(text) &&
+      /^[$€£¥]?\s*\d[\d,.]*(?:\s*\([^)]*\))?$/i.test(text)
+    );
+  }
+
   function isBlockedAmazonVariantValue(value) {
     return (
       !value ||
       value.length > 90 ||
+      isPriceOnlyAmazonVariantValue(value) ||
       /^(text|background|window|white|black|red|green|blue|yellow|magenta)$/i.test(value) ||
-      /video|image|see all|customer reviews|price history|add to cart|buy now/i.test(value)
+      /video|image|see all|customer reviews|price history|add to cart|buy now|previous page|next page/i.test(value)
     );
   }
 
+  function extractAmazonVariantValueFromText(value) {
+    const text = cleanAmazonVariantValue(value);
+
+    if (!text) {
+      return "";
+    }
+
+    const numberedShade = text.match(/#\s*\d{2,5}\s+[\w][\w\s.'-]{1,50}/i);
+
+    if (numberedShade?.[0]) {
+      return cleanAmazonVariantValue(numberedShade[0].replace(/#\s*/, "#"));
+    }
+
+    const selectedShade = text.match(/(?:color|colour|shade)\s*[:：]\s*(.+)$/i);
+
+    if (selectedShade?.[1]) {
+      return cleanAmazonVariantValue(selectedShade[1]);
+    }
+
+    return text;
+  }
+
+  function getAmazonVariantAsin(element) {
+    const values = [
+      element?.getAttribute?.("data-defaultasin"),
+      element?.getAttribute?.("data-asin"),
+      element?.getAttribute?.("data-csa-c-item-id"),
+      element?.getAttribute?.("data-csa-c-asin"),
+      element?.getAttribute?.("data-dp-url"),
+      element?.querySelector?.("[data-defaultasin]")?.getAttribute("data-defaultasin"),
+      element?.querySelector?.("[data-asin]")?.getAttribute("data-asin"),
+      element?.querySelector?.("[data-dp-url]")?.getAttribute("data-dp-url"),
+      element?.querySelector?.("a[href]")?.getAttribute("href"),
+      element?.closest?.("a[href]")?.getAttribute("href"),
+      element?.id
+    ];
+
+    for (const value of values) {
+      const text = cleanText(value);
+      const directMatch = text.match(/\b([A-Z0-9]{10})\b/i);
+      const asin = getAmazonAsinFromUrlText(text) || directMatch?.[1] || "";
+
+      if (asin) {
+        return asin.toUpperCase();
+      }
+    }
+
+    return "";
+  }
+
+  function getAmazonVariantOptionIdentity(option) {
+    const asin = cleanText(option?.asin).toLowerCase();
+    const value = cleanAmazonVariantValue(option?.value).toLowerCase();
+
+    if (asin) {
+      return `asin:${asin}`;
+    }
+
+    return value ? `value:${value}` : "";
+  }
+
+  function getAmazonVariantImageMatchText(value) {
+    return cleanAmazonVariantValue(value)
+      .toLowerCase()
+      .replace(/[#:/(),]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function getAmazonVariantImageContext(element) {
+    const image = element?.matches?.("img, source") ? element : element?.querySelector?.("img, source");
+    const linkedElement = element?.querySelector?.("a[href]") || element?.closest?.("a[href]");
+
+    return [
+      element?.getAttribute?.("aria-label"),
+      element?.getAttribute?.("title"),
+      element?.getAttribute?.("data-title"),
+      element?.getAttribute?.("data-value"),
+      element?.getAttribute?.("data-asin"),
+      element?.getAttribute?.("data-defaultasin"),
+      element?.getAttribute?.("data-dp-url"),
+      image?.getAttribute?.("alt"),
+      image?.getAttribute?.("title"),
+      linkedElement?.getAttribute?.("aria-label"),
+      linkedElement?.getAttribute?.("title"),
+      linkedElement?.getAttribute?.("href"),
+      element?.innerText,
+      element?.textContent
+    ]
+      .map(cleanText)
+      .filter(Boolean)
+      .join(" ")
+      .slice(0, 1200);
+  }
+
+  function getAmazonVariantImageMatchScore(context, value, asin) {
+    const normalizedContext = getAmazonVariantImageMatchText(context);
+    const normalizedValue = getAmazonVariantImageMatchText(value);
+    const asinText = cleanText(asin).toLowerCase();
+    let score = 0;
+
+    if (asinText && normalizedContext.includes(asinText)) {
+      score += 24;
+    }
+
+    if (normalizedValue.length >= 4 && normalizedContext.includes(normalizedValue)) {
+      score += 28;
+    }
+
+    const shadeNumber = cleanText(value).match(/#?\s*(\d{2,5})/);
+
+    if (shadeNumber?.[1] && normalizedContext.includes(shadeNumber[1])) {
+      score += 8;
+    }
+
+    return score;
+  }
+
+  function getAmazonImageUrlQualityScore(url) {
+    const text = String(url || "");
+    const prefix = Number(text.match(/\/images\/I\/(\d{2})/i)?.[1] || 0);
+    let score = /media-amazon\.com|ssl-images-amazon\.com/i.test(text) ? 6 : 0;
+
+    if (prefix >= 70) {
+      score += 14;
+    } else if (prefix >= 60) {
+      score += 12;
+    } else if (prefix >= 50) {
+      score += 8;
+    } else if (prefix >= 40) {
+      score += 4;
+    }
+
+    return score;
+  }
+
+  function addAmazonVariantImageCandidate(candidates, url, score) {
+    const normalizedUrl = normalizeProductImageUrl(url);
+
+    if (!isLikelyProductImage(normalizedUrl)) {
+      return;
+    }
+
+    candidates.push({
+      url: normalizedUrl,
+      score: score + getAmazonImageUrlQualityScore(normalizedUrl)
+    });
+  }
+
+  function collectAmazonVariantImageCandidatesFromElement(element, value, asin, baseScore) {
+    if (!element) {
+      return [];
+    }
+
+    const candidates = [];
+    const targets = [element];
+
+    element.querySelectorAll?.(
+      "img, source, [data-a-dynamic-image], [data-old-hires], [data-hires], [data-large-image], [data-zoom-hires], [style]"
+    ).forEach((target) => {
+      if (!targets.includes(target)) {
+        targets.push(target);
+      }
+    });
+
+    const rootMatchScore = getAmazonVariantImageMatchScore(
+      getAmazonVariantImageContext(element),
+      value,
+      asin
+    );
+
+    targets.forEach((target) => {
+      const targetMatchScore = getAmazonVariantImageMatchScore(
+        getAmazonVariantImageContext(target),
+        value,
+        asin
+      );
+      const score = baseScore + Math.max(rootMatchScore, targetMatchScore);
+
+      collectImageUrlsFromElement(target).forEach((url) => {
+        addAmazonVariantImageCandidate(candidates, url, score);
+      });
+    });
+
+    return candidates;
+  }
+
+  function getAmazonVariantImageLookupKeys(value, asin) {
+    const keys = [];
+    const cleanValue = cleanAmazonVariantValue(value);
+    const shadeMatch = cleanValue.match(/#?\s*(\d{2,5})\s+([A-Za-z][\w.'-]+)/);
+
+    if (asin) {
+      keys.push({ value: cleanText(asin), score: 76 });
+    }
+
+    if (cleanValue.length >= 5) {
+      keys.push({ value: cleanValue, score: 66 });
+    }
+
+    if (shadeMatch) {
+      keys.push({ value: `#${shadeMatch[1]} ${shadeMatch[2]}`, score: 64 });
+      keys.push({ value: `${shadeMatch[1]} ${shadeMatch[2]}`, score: 62 });
+    }
+
+    const seen = new Set();
+
+    return keys.filter((item) => {
+      const key = item.value.toLowerCase();
+
+      if (!item.value || seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function collectAmazonImagesNearText(anchorText) {
+    const anchor = cleanText(anchorText);
+    const cacheKey = anchor.toLowerCase();
+
+    if (anchor.length < 4) {
+      return [];
+    }
+
+    if (amazonVariantScriptImageCache.has(cacheKey)) {
+      return amazonVariantScriptImageCache.get(cacheKey);
+    }
+
+    const urls = [];
+    const needle = anchor.toLowerCase();
+
+    getAmazonImageScriptTexts().forEach((scriptText) => {
+      const lowerText = scriptText.toLowerCase();
+      let index = lowerText.indexOf(needle);
+      let matchCount = 0;
+
+      while (index !== -1 && matchCount < 8 && urls.length < 40) {
+        const start = Math.max(0, index - 2600);
+        const end = Math.min(scriptText.length, index + needle.length + 2600);
+
+        urls.push(...extractAmazonImageUrlsFromText(scriptText.slice(start, end)));
+        index = lowerText.indexOf(needle, index + needle.length);
+        matchCount += 1;
+      }
+    });
+
+    const result = uniqueImages(urls).slice(0, 8).map((image) => image.url);
+
+    amazonVariantScriptImageCache.set(cacheKey, result);
+    return result;
+  }
+
+  function collectAmazonVariantImageCandidatesFromScripts(value, asin) {
+    const candidates = [];
+
+    getAmazonVariantImageLookupKeys(value, asin).forEach((lookup) => {
+      collectAmazonImagesNearText(lookup.value).forEach((url, index) => {
+        addAmazonVariantImageCandidate(candidates, url, lookup.score - index);
+      });
+    });
+
+    return candidates;
+  }
+
+  function pickBestAmazonVariantImageUrl(candidates) {
+    const seen = new Set();
+
+    return candidates
+      .sort((left, right) => right.score - left.score)
+      .find((candidate) => {
+        const key = getImageDedupKey(candidate.url);
+
+        if (seen.has(key)) {
+          return false;
+        }
+
+        seen.add(key);
+        return true;
+      })?.url || "";
+  }
+
+  function getAmazonVariantImageUrl(optionRoot, element, value, asin) {
+    const candidates = [
+      ...collectAmazonVariantImageCandidatesFromElement(optionRoot, value, asin, 44),
+      ...collectAmazonVariantImageCandidatesFromElement(element, value, asin, 38),
+      ...collectAmazonVariantImageCandidatesFromScripts(value, asin)
+    ];
+
+    return pickBestAmazonVariantImageUrl(candidates);
+  }
+
   function getAmazonVariantText(element) {
+    const image = element.querySelector?.("img");
+    const linkedElement = element.querySelector?.("a[href]") || element.closest?.("a[href]");
+    const attributeText = [
+      element.getAttribute?.("aria-label"),
+      element.getAttribute?.("title"),
+      element.getAttribute?.("data-title"),
+      element.getAttribute?.("data-value"),
+      image?.getAttribute("alt"),
+      image?.getAttribute("title"),
+      linkedElement?.getAttribute("aria-label"),
+      linkedElement?.getAttribute("title")
+    ]
+      .map(extractAmazonVariantValueFromText)
+      .find((text) => text && !isBlockedAmazonVariantValue(text));
+
+    if (attributeText) {
+      return attributeText;
+    }
+
     const text =
       element.querySelector?.(".a-button-text")?.innerText ||
       element.querySelector?.(".a-button-text")?.textContent ||
@@ -3106,34 +4404,101 @@
       element.textContent ||
       "";
 
-    return cleanAmazonVariantValue(text);
+    return extractAmazonVariantValueFromText(text);
   }
 
   function getAmazonVariantPriceInfo(element) {
-    const priceText =
-      element.querySelector?.(".a-price .a-offscreen")?.textContent ||
-      element.querySelector?.(".a-color-price")?.textContent ||
-      "";
-    const compareText =
-      element.querySelector?.(".a-text-strike")?.textContent ||
-      element.querySelector?.("[data-a-strike='true'] .a-offscreen")?.textContent ||
-      "";
-    const text = cleanText(element.innerText || element.textContent || "");
-    const prices = [...text.matchAll(/\$\s*\d[\d,.]*/g)]
-      .map((match) => normalizePrice(match[0]))
-      .filter(Boolean);
-    const price = normalizePrice(priceText) || prices[0] || "";
-    const compareAtPrice =
-      normalizePrice(compareText) ||
-      prices.find((candidate) => Number(candidate) > Number(price || 0)) ||
-      "";
+    const text = cleanText(element?.innerText || element?.textContent || "");
+    const priceValues = [
+      ...collectMoneyValuesFromAttributes(element, [
+        "data-price",
+        "data-current-price",
+        "data-sale-price",
+        "data-a-price",
+        "data-base-price"
+      ]),
+      ...collectMoneyValuesFromAttributes(element, [
+        "data-price-cents",
+        "data-current-price-cents",
+        "data-sale-price-cents"
+      ], true),
+      ...collectMoneyValuesFromSelectors(element, [
+        ".a-price .a-offscreen",
+        ".a-color-price",
+        "[data-price]",
+        "[data-current-price]",
+        "[data-sale-price]",
+        "[class*='price'][class*='current']",
+        "[class*='price'][class*='sale']"
+      ]),
+      ...extractLabeledMoneyValues(text, getCurrentPriceLabelPattern())
+    ];
+    const compareValues = [
+      ...collectMoneyValuesFromAttributes(element, [
+        "data-compare-at-price",
+        "data-compare-price",
+        "data-list-price",
+        "data-original-price",
+        "data-was-price"
+      ]),
+      ...collectMoneyValuesFromSelectors(element, [
+        ".a-text-strike",
+        "[data-a-strike='true'] .a-offscreen",
+        "[data-compare-at-price]",
+        "[data-compare-price]",
+        "[data-list-price]",
+        "[data-original-price]",
+        "[data-was-price]",
+        "s",
+        "del"
+      ]),
+      ...extractLabeledMoneyValues(text, getComparePriceLabelPattern())
+    ];
 
-    return { price, compareAtPrice };
+    return getPriceInfoFromMoneyValues(
+      priceValues,
+      compareValues,
+      extractMoneyValues(text)
+    );
+  }
+
+  function getAmazonVariantOptionRoot(element, group) {
+    const root = element?.closest?.(
+      [
+        "li[data-defaultasin]",
+        "li[data-asin]",
+        "li[data-dp-url]",
+        "li[id*='_name_']",
+        "li[id*='_color_']",
+        "li[id*='_size_']",
+        "li.swatchAvailable",
+        "li.swatchSelect",
+        "li.swatchUnavailable",
+        "[data-defaultasin]",
+        "[data-asin]",
+        "[data-dp-url]",
+        "[data-csa-c-asin]",
+        "[data-csa-c-item-id]",
+        ".a-button",
+        "button"
+      ].join(", ")
+    );
+
+    return root && group?.contains?.(root) ? root : element;
   }
 
   function collectAmazonVariantOptions(group) {
     const optionSelectors = [
       "li[data-defaultasin]",
+      "li[data-asin]",
+      "li[data-dp-url]",
+      "[data-defaultasin]",
+      "[data-asin]",
+      "[data-dp-url]",
+      "[data-csa-c-asin]",
+      "[data-csa-c-item-id]",
+      "a[href*='/dp/']",
+      "a[href*='/gp/product/']",
       "li[id*='_name_']",
       "li[id*='_color_']",
       "li[id*='_size_']",
@@ -3151,26 +4516,111 @@
     const options = [];
 
     optionElements.forEach((element) => {
-      const value = getAmazonVariantText(element);
-      const key = value.toLowerCase();
+      const optionRoot = getAmazonVariantOptionRoot(element, group);
+      const value = getAmazonVariantText(optionRoot);
 
-      if (isBlockedAmazonVariantValue(value) || seen.has(key)) {
+      if (isBlockedAmazonVariantValue(value)) {
+        return;
+      }
+
+      const asin = getAmazonVariantAsin(optionRoot) || getAmazonVariantAsin(element);
+      const nextOption = {
+        value,
+        asin,
+        imageUrl: getAmazonVariantImageUrl(optionRoot, element, value, asin),
+        ...getAmazonVariantPriceInfo(optionRoot)
+      };
+      const key = getAmazonVariantOptionIdentity(nextOption);
+      const existingOption = options.find(
+        (option) => getAmazonVariantOptionIdentity(option) === key
+      );
+
+      if (!key) {
+        return;
+      }
+
+      if (existingOption || seen.has(key)) {
+        mergeAmazonVariantOption(existingOption, nextOption);
         return;
       }
 
       seen.add(key);
-      options.push({
-        value,
-        asin: cleanText(element.getAttribute("data-defaultasin")),
-        imageUrl: collectImageUrlsFromElement(element)[0] || "",
-        ...getAmazonVariantPriceInfo(element)
-      });
+      options.push(nextOption);
     });
 
     return options;
   }
 
-  function collectAmazonVariantGroups() {
+  function mergeAmazonVariantOption(targetOption, sourceOption) {
+    if (!targetOption || !sourceOption) {
+      return;
+    }
+
+    targetOption.asin = targetOption.asin || sourceOption.asin || "";
+    targetOption.value = targetOption.value || sourceOption.value || "";
+    targetOption.price = targetOption.price || sourceOption.price || "";
+    targetOption.compareAtPrice =
+      targetOption.compareAtPrice || sourceOption.compareAtPrice || "";
+
+    if (
+      sourceOption.imageUrl &&
+      (
+        !targetOption.imageUrl ||
+        getAmazonImageUrlQualityScore(sourceOption.imageUrl) >
+          getAmazonImageUrlQualityScore(targetOption.imageUrl)
+      )
+    ) {
+      targetOption.imageUrl = sourceOption.imageUrl;
+    }
+  }
+
+  function mergeAmazonVariantGroups(targetGroups, sourceGroups) {
+    sourceGroups.forEach((sourceGroup) => {
+      if (!sourceGroup?.options?.length) {
+        return;
+      }
+
+      const labelKey = cleanAmazonVariantName(sourceGroup.label).toLowerCase();
+      let targetGroup = targetGroups.find(
+        (group) => cleanAmazonVariantName(group.label).toLowerCase() === labelKey
+      );
+
+      if (!targetGroup) {
+        targetGroups.push({
+          label: sourceGroup.label,
+          options: [...sourceGroup.options]
+        });
+        return;
+      }
+
+      const seen = new Set(
+        targetGroup.options.map((option) => getAmazonVariantOptionIdentity(option))
+      );
+
+      sourceGroup.options.forEach((option) => {
+        const key = getAmazonVariantOptionIdentity(option);
+        const existingOption = targetGroup.options.find(
+          (targetOption) => getAmazonVariantOptionIdentity(targetOption) === key
+        );
+
+        if (existingOption) {
+          mergeAmazonVariantOption(existingOption, option);
+          return;
+        }
+
+        if (seen.has(key)) {
+          return;
+        }
+
+        seen.add(key);
+        targetGroup.options.push(option);
+      });
+    });
+
+    return targetGroups;
+  }
+
+  function collectAmazonVariantGroupsFromCurrentPage() {
     const twister = document.querySelector("#twister_feature_div, #twister");
 
     if (!twister) {
@@ -3202,7 +4652,6 @@
 
         if (
           options.length < 2 ||
-          options.length > 16 ||
           seen.has(key) ||
           /^(text|background|window)$/i.test(label)
         ) {
@@ -3216,8 +4665,103 @@
     return groups.slice(0, 3);
   }
 
-  function getVariantCombinationCount(groups) {
-    return groups.reduce((total, group) => total * Math.max(group.options.length, 1), 1);
+  function getAmazonVariantPageLinks() {
+    const twister = document.querySelector("#twister_feature_div, #twister");
+
+    if (!twister) {
+      return [];
+    }
+
+    return Array.from(twister.querySelectorAll("a"))
+      .map((link) => ({
+        link,
+        pageNumber: Number(cleanText(link.textContent))
+      }))
+      .filter((item) => Number.isInteger(item.pageNumber) && item.pageNumber > 0)
+      .sort((left, right) => left.pageNumber - right.pageNumber);
+  }
+
+  function getAmazonSelectedVariantPageNumber() {
+    const selectedLink = document.querySelector(
+      "#twister_feature_div .a-selected, #twister .a-selected"
+    );
+    const selectedText = cleanText(selectedLink?.textContent);
+    const selectedNumber = Number(selectedText);
+
+    return Number.isInteger(selectedNumber) && selectedNumber > 0 ? selectedNumber : 1;
+  }
+
+  function getAmazonVariantPageLink(pageNumber) {
+    return getAmazonVariantPageLinks().find((item) => item.pageNumber === pageNumber)?.link || null;
+  }
+
+  function queueAmazonVariantPageNumbers(pageQueue, queuedPageNumbers) {
+    getAmazonVariantPageLinks().forEach((item) => {
+      if (queuedPageNumbers.has(item.pageNumber)) {
+        return;
+      }
+
+      queuedPageNumbers.add(item.pageNumber);
+      pageQueue.push(item.pageNumber);
+    });
+  }
+
+  async function collectAmazonVariantGroups(collectorOptions = {}) {
+    const options = normalizeCollectorOptions(collectorOptions);
+    const groups = collectAmazonVariantGroupsFromCurrentPage();
+
+    if (!options.amazonFollowVariantPages) {
+      return groups;
+    }
+
+    const pageLinks = getAmazonVariantPageLinks();
+
+    if (pageLinks.length <= 1) {
+      return groups;
+    }
+
+    const originalPage = getAmazonSelectedVariantPageNumber();
+    const queuedPageNumbers = new Set();
+    const visitedPageNumbers = new Set([originalPage]);
+    const pageQueue = [];
+
+    queueAmazonVariantPageNumbers(pageQueue, queuedPageNumbers);
+
+    while (pageQueue.length) {
+      const pageNumber = pageQueue.shift();
+
+      if (pageNumber === getAmazonSelectedVariantPageNumber()) {
+        continue;
+      }
+
+      if (visitedPageNumbers.has(pageNumber)) {
+        continue;
+      }
+
+      const link = getAmazonVariantPageLink(pageNumber);
+
+      if (!link) {
+        continue;
+      }
+
+      visitedPageNumbers.add(pageNumber);
+      link.click();
+      await delay(450);
+      mergeAmazonVariantGroups(
+        groups,
+        collectAmazonVariantGroupsFromCurrentPage()
+      );
+      queueAmazonVariantPageNumbers(pageQueue, queuedPageNumbers);
+    }
+
+    const originalLink = getAmazonVariantPageLink(originalPage);
+
+    if (originalLink && originalPage !== getAmazonSelectedVariantPageNumber()) {
+      originalLink.click();
+      await delay(250);
+    }
+
+    return groups;
   }
 
   function buildAmazonVariants(groups, basePrice, baseCompareAtPrice, imageUrls) {
@@ -3225,17 +4769,10 @@
       return [];
     }
 
-    const usableGroups =
-      getVariantCombinationCount(groups) > MAX_AMAZON_VARIANT_COUNT
-        ? [groups.sort((left, right) => right.options.length - left.options.length)[0]]
-        : groups;
+    const usableGroups = groups;
     const variants = [];
 
     function visit(groupIndex, selected) {
-      if (variants.length >= MAX_AMAZON_VARIANT_COUNT) {
-        return;
-      }
-
       if (groupIndex >= usableGroups.length) {
         const priceOption = [...selected].reverse().find((option) => option.price);
         const compareOption = [...selected].reverse().find((option) => option.compareAtPrice);
@@ -3266,16 +4803,18 @@
     return variants;
   }
 
-  function collectAmazonVariants(basePrice, baseCompareAtPrice, imageUrls) {
+  async function collectAmazonVariants(basePrice, baseCompareAtPrice, imageUrls, collectorOptions = {}) {
+    const options = normalizeCollectorOptions(collectorOptions);
+
     return buildAmazonVariants(
-      collectAmazonVariantGroups(),
+      await collectAmazonVariantGroups(options),
       basePrice,
       baseCompareAtPrice,
       imageUrls
     );
   }
 
-  function collectAmazonProduct() {
+  async function collectAmazonProduct(collectorOptions = {}) {
     if (!/amazon\./i.test(window.location.hostname)) {
       return {};
     }
@@ -3307,7 +4846,7 @@
     imageUrls.push(...collectAmazonImagesFromScripts());
     const price = queryAmazonPrice();
     const compareAtPrice = queryAmazonCompareAtPrice();
-    const variants = collectAmazonVariants(price, compareAtPrice, imageUrls);
+    const variants = await collectAmazonVariants(price, compareAtPrice, imageUrls, collectorOptions);
 
     return {
       title,
@@ -3390,7 +4929,6 @@
 
     return variations
       .filter((variation) => variation && variation.is_purchasable !== false)
-      .slice(0, MAX_VARIANT_COUNT)
       .map((variation, index) => {
         const attributes = Object.entries(variation.attributes || {}).filter(([, value]) =>
           cleanText(value)
@@ -3615,7 +5153,7 @@
         ? product.variantList
         : [];
 
-    return variants.slice(0, MAX_VARIANT_COUNT).map((variant, index) => {
+    return variants.map((variant, index) => {
       const options = [
         variant.option1 || variant.option1Value || variant.title,
         variant.option2 || variant.option2Value,
@@ -3692,16 +5230,19 @@
           "[class*='market'][class*='price']"
         ])
     );
-    const images = [
-      ...normalizePlatformImages(stateProduct?.images || stateProduct?.media),
-      ...collectLinkedImageUrls([
-        "[class*='product'][class*='gallery'] img",
-        "[class*='product'][class*='media'] img",
-        "[class*='product'][class*='thumb'] img",
-        "[class*='gallery'] img",
-        "[class*='swiper'] img"
-      ])
-    ];
+    const primaryGallery = collectPrimaryGalleryImageUrls();
+    const stateImages = normalizePlatformImages(stateProduct?.images || stateProduct?.media);
+    const linkedImages = primaryGallery.urls.length
+      ? primaryGallery.urls
+      : collectLinkedImageUrls([
+          "[class*='product'][class*='gallery'] img",
+          "[class*='product'][class*='media'] img",
+          "[class*='product'][class*='thumb'] img"
+        ]);
+    const images =
+      primaryGallery.urls.length && stateImages.length > primaryGallery.urls.length * 3
+        ? primaryGallery.urls
+        : [...stateImages, ...linkedImages];
 
     return {
       title:
@@ -3730,16 +5271,16 @@
       compareAtPrice,
       images,
       variants: collectCommerceCloudVariants(stateProduct || {}, price, compareAtPrice),
-      imagePriority: images.length ? "primary-gallery" : "",
+      imagePriority: primaryGallery.urls.length || images.length ? "primary-gallery" : "",
       source: window.Shoplazza || /shoplazza/i.test(document.documentElement.innerHTML)
         ? "shoplazza"
         : "shopline"
     };
   }
 
-  function collectPlatformProduct() {
+  async function collectPlatformProduct(collectorOptions = {}) {
     return [
-      collectAmazonProduct(),
+      await collectAmazonProduct(collectorOptions),
       collectWooCommerceProduct(),
       collectShoplineShoplazzaProduct()
     ].find((product) => getPlatformProductSignals(product)) || {};
@@ -3861,31 +5402,10 @@
         "[id*='price']"
       ]);
 
-    const imageUrls = [];
-    const imageSelectors = [
-      "[data-testid*='product'] img",
-      "[data-test*='product'] img",
-      "[class*='gallery'] img",
-      "[class*='carousel'] img",
-      "[class*='slider'] img",
-      "[class*='media'] img",
-      "[class*='product'] img",
-      "[id*='product'] img",
-      "main picture source",
-      "main img",
-      "picture source",
-      "img"
-    ];
-
-    for (const selector of imageSelectors) {
-      document.querySelectorAll(selector).forEach((element) => {
-        imageUrls.push(...collectImageUrlsFromElement(element));
-      });
-
-      if (imageUrls.length >= MAX_IMAGE_COUNT) {
-        break;
-      }
-    }
+    const primaryGallery = collectPrimaryGalleryImageUrls();
+    const imageUrls = primaryGallery.urls.length
+      ? primaryGallery.urls
+      : collectFallbackDomImageUrls();
 
     const titleCandidates = [
       queryText([
@@ -3939,6 +5459,8 @@
       sku: collectSkuFromText(),
       images: imageUrls,
       variants: /amazon\./i.test(window.location.hostname) ? [] : collectDomVariants(),
+      imagePriority: primaryGallery.urls.length ? "primary-gallery" : "",
+      imageSourceSelector: primaryGallery.selector,
       source: "dom"
     };
   }
@@ -3986,48 +5508,88 @@
     };
   }
 
+  function shouldPreferShopifyApi(shopify = {}) {
+    return shopify.source === "shopify-api" && getPlatformProductSignals(shopify) > 0;
+  }
+
+  function pickProductField(sources, field) {
+    for (const source of sources) {
+      const value = source?.[field];
+
+      if (Array.isArray(value) ? value.length : cleanText(value)) {
+        return value;
+      }
+    }
+
+    return "";
+  }
+
+  function getAutomaticImageSources(preferShopifyApi, jsonLd, meta, dom, shopify, siteRule) {
+    if (preferShopifyApi) {
+      return shopify.images?.length
+        ? [shopify]
+        : [siteRule, jsonLd, meta, dom];
+    }
+
+    if (dom.imagePriority === "primary-gallery" && dom.images?.length >= 2) {
+      return [dom, siteRule];
+    }
+
+    if (siteRule.imagePriority === "site-rule") {
+      return [siteRule, jsonLd, shopify, meta, dom];
+    }
+
+    if (dom.imagePriority === "primary-gallery") {
+      return [dom, siteRule, jsonLd, shopify, meta];
+    }
+
+    return [jsonLd, shopify, meta, siteRule, dom];
+  }
+
   function mergeProductData(jsonLd, meta, dom, shopify = {}, siteRule = {}) {
+    const preferShopifyApi = shouldPreferShopifyApi(shopify);
+    const fieldSources = preferShopifyApi
+      ? [shopify, siteRule, jsonLd, meta, dom]
+      : [siteRule, jsonLd, shopify, meta, dom];
+    const descriptionSources = preferShopifyApi
+      ? [shopify, siteRule, jsonLd, dom, meta]
+      : [siteRule, jsonLd, shopify, dom, meta];
+    const merchandisingSources = preferShopifyApi
+      ? [shopify, siteRule, jsonLd, dom]
+      : [siteRule, jsonLd, shopify, dom];
     const title =
-      siteRule.title ||
-      jsonLd.title ||
-      shopify.title ||
-      meta.title ||
-      dom.title ||
+      pickProductField(fieldSources, "title") ||
       sanitizeDocumentTitle(document.title) ||
       "";
     const description =
-      siteRule.description ||
-      jsonLd.description ||
-      shopify.description ||
-      dom.description ||
-      meta.description ||
+      pickProductField(descriptionSources, "description") ||
       "";
+    const automaticImageSources = getAutomaticImageSources(
+      preferShopifyApi,
+      jsonLd,
+      meta,
+      dom,
+      shopify,
+      siteRule
+    );
     const imageSourceGroups =
       dom.imagePriority === "manual"
-        ? [dom, siteRule, jsonLd, shopify, meta]
-        : siteRule.imagePriority === "site-rule"
-        ? [siteRule, jsonLd, shopify, meta, dom]
-        : dom.imagePriority === "primary-gallery"
-        ? [dom, siteRule, jsonLd, shopify, meta]
-        : [jsonLd, shopify, meta, siteRule, dom];
+        ? [dom, ...automaticImageSources]
+        : automaticImageSources;
     const images = uniqueImages(
       imageSourceGroups.flatMap((source) => source.images || [])
     ).map((image) => ({
       ...image,
       altText: image.altText || title
     }));
-    const baseSku = siteRule.sku || jsonLd.sku || shopify.sku || dom.sku || "";
-    const basePrice = siteRule.price || jsonLd.price || shopify.price || dom.price || "";
+    const baseSku = pickProductField(merchandisingSources, "sku");
+    const basePrice = pickProductField(merchandisingSources, "price");
     const baseCompareAtPrice =
-      siteRule.compareAtPrice ||
-      jsonLd.compareAtPrice ||
-      shopify.compareAtPrice ||
-      dom.compareAtPrice ||
-      "";
-    const collectedVariants = getUsefulVariants(siteRule, shopify, jsonLd, dom).slice(
-      0,
-      MAX_VARIANT_COUNT
-    );
+      pickProductField(merchandisingSources, "compareAtPrice");
+    const variantSources = preferShopifyApi
+      ? [shopify, siteRule, jsonLd, dom]
+      : [siteRule, shopify, jsonLd, dom];
+    const collectedVariants = getUsefulVariants(...variantSources);
     const variants = collectedVariants.length
       ? collectedVariants.map((variant, index) =>
           normalizeCollectedVariant(
@@ -4055,7 +5617,10 @@
           }
         ];
 
-    const sourcePriority = [siteRule.source, shopify.source, jsonLd.source, meta.source, dom.source].filter(
+    const rawSourcePriority = preferShopifyApi
+      ? [shopify.source, siteRule.source, jsonLd.source, meta.source, dom.source]
+      : [siteRule.source, shopify.source, jsonLd.source, meta.source, dom.source];
+    const sourcePriority = rawSourcePriority.filter(
       (source) => {
         if (source === "custom-rule" || source === "site-rule") {
           return Boolean(
@@ -4097,11 +5662,11 @@
       title,
       handle: generateHandle(title),
       description,
-      vendor: siteRule.vendor || jsonLd.vendor || shopify.vendor || dom.vendor || "",
+      vendor: pickProductField(merchandisingSources, "vendor"),
       productCategory: "",
       type: shopify.type || "",
       tags: shopify.tags || "",
-      status: "draft",
+      status: "active",
       published: "false",
       sku: baseSku,
       barcode: "",
@@ -4131,7 +5696,7 @@
     };
   }
 
-  async function collectProduct() {
+  async function collectProduct(collectorOptions = {}) {
     const jsonLd = collectJsonLdProduct();
     const shopify = await collectShopifyProduct();
     const meta = collectMetaProduct();
@@ -4140,7 +5705,7 @@
     const storedImageSelector = await readStoredImageSelector();
     const manualImageInfo = inspectImagesFromSelector(storedImageSelector);
     const manualImages = manualImageInfo.urls;
-    const platform = collectPlatformProduct();
+    const platform = await collectPlatformProduct(collectorOptions);
     const dom = {
       ...collectDomProduct(),
       ...Object.fromEntries(
@@ -4181,7 +5746,7 @@
     }
 
     if (message.type === "SPC_COLLECT_PRODUCT") {
-      collectProduct()
+      collectProduct(message.options || {})
         .then((product) => {
           sendResponse({
             ok: true,
@@ -4330,7 +5895,8 @@
               pageUrl: window.location.href,
               nodeCount: imageInfo.nodeCount,
               urlCount: imageInfo.urlCount,
-              imageCount: imageInfo.urlCount
+              imageCount: imageInfo.urlCount,
+              urls: imageInfo.urls
             }
           });
         })
