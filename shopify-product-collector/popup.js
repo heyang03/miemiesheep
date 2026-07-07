@@ -109,6 +109,7 @@ const excludeSelectedVariantsButton = document.getElementById("excludeSelectedVa
 const includeSelectedVariantsButton = document.getElementById("includeSelectedVariantsButton");
 const mergeDuplicateVariantsButton = document.getElementById("mergeDuplicateVariantsButton");
 const fillVariantSkuButton = document.getElementById("fillVariantSkuButton");
+const checkVariantsButton = document.getElementById("checkVariantsButton");
 const variantSearchInput = document.getElementById("variantSearchInput");
 const variantBody = document.getElementById("variantBody");
 const variantHeader = variantTitleToggle?.closest(".accordion-header");
@@ -2710,6 +2711,7 @@ function clearValidationResults() {
   validationPanel.hidden = true;
   validationSummary.textContent = "等待校验";
   clearElement(validationList);
+  clearVariantValidationMarks();
 }
 
 function setInputValue(input, value) {
@@ -4654,6 +4656,104 @@ function isStrictPrice(value) {
   return /^\d+(\.\d{1,2})?$/.test(text);
 }
 
+function parseStrictPriceNumber(value) {
+  const text = String(value || "").trim();
+
+  if (!isStrictPrice(text)) {
+    return null;
+  }
+
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
+}
+
+function addValidationIssue(target, field, message, options = {}) {
+  target.push({
+    field,
+    message,
+    variantIndex: Number.isInteger(options.variantIndex) ? options.variantIndex : null
+  });
+}
+
+function getVariantValidationPrefix(entry, exportableCount) {
+  const displayIndex = Number(entry?.index || 0) + 1;
+
+  return exportableCount > 1 ? `变体 #${displayIndex}` : "变体";
+}
+
+function getVariantOptionCombinationKey(variant) {
+  return [
+    variant.option1Value,
+    variant.option2Value,
+    variant.option3Value
+  ]
+    .map(normalizeVariantDuplicateText)
+    .join("|");
+}
+
+function getImageUrlKeySet(images = []) {
+  return new Set(
+    images
+      .map((image) => String(image.url || "").trim())
+      .filter(Boolean)
+      .flatMap((url) => [url.toLowerCase(), getImageDedupKey(url)])
+      .filter(Boolean)
+  );
+}
+
+function isVariantImageInProductImages(url, imageKeys) {
+  const value = String(url || "").trim();
+
+  if (!value) {
+    return true;
+  }
+
+  return imageKeys.has(value.toLowerCase()) || imageKeys.has(getImageDedupKey(value));
+}
+
+function clearVariantValidationMarks() {
+  variantList
+    ?.querySelectorAll(".variant-item.has-validation-error, .variant-item.has-validation-warning")
+    .forEach((item) => {
+      item.classList.remove("has-validation-error", "has-validation-warning");
+      item.removeAttribute("data-validation-message");
+      item.removeAttribute("title");
+    });
+}
+
+function applyVariantValidationMarks(result = { errors: [], warnings: [] }) {
+  clearVariantValidationMarks();
+
+  const issues = [
+    ...(Array.isArray(result.errors) ? result.errors.map((issue) => ({ ...issue, level: "error" })) : []),
+    ...(Array.isArray(result.warnings) ? result.warnings.map((issue) => ({ ...issue, level: "warning" })) : [])
+  ].filter((issue) => Number.isInteger(issue.variantIndex));
+  const firstIssueByVariant = new Map();
+
+  issues.forEach((issue) => {
+    const item = variantList?.querySelector(
+      `.variant-item[data-variant-index="${issue.variantIndex}"]`
+    );
+
+    if (!item) {
+      return;
+    }
+
+    if (issue.level === "error") {
+      item.classList.add("has-validation-error");
+      item.classList.remove("has-validation-warning");
+    } else if (!item.classList.contains("has-validation-error")) {
+      item.classList.add("has-validation-warning");
+    }
+
+    if (!firstIssueByVariant.has(issue.variantIndex)) {
+      firstIssueByVariant.set(issue.variantIndex, issue.message);
+      item.dataset.validationMessage = issue.message;
+      item.title = issue.message;
+    }
+  });
+}
+
 function getFirstVariant(product) {
   return product?.variants?.[0] || {};
 }
@@ -4667,7 +4767,12 @@ function getExportValidation(product) {
       url: String(image.url || "").trim()
     }))
     .filter((image) => image.url);
-  const variants = getExportableVariants(product, images);
+  const allVariants = normalizeVariants(product, images);
+  const variantEntries = allVariants
+    .map((variant, index) => ({ variant, index }))
+    .filter(({ variant }) => !variant.excludedFromExport);
+  const variants = variantEntries.map(({ variant }) => variant);
+  const imageKeys = getImageUrlKeySet(images);
 
   if (!String(product.title || "").trim()) {
     errors.push({ field: "title", message: "商品标题不能为空。" });
@@ -4684,51 +4789,199 @@ function getExportValidation(product) {
     });
   }
 
-  variants.forEach((variant, index) => {
-    const prefix = variants.length > 1 ? `变体 #${index + 1}` : "变体";
+  const skuEntries = new Map();
+  const barcodeEntries = new Map();
+  const optionCombinationEntries = new Map();
+
+  variantEntries.forEach((entry) => {
+    const { variant, index } = entry;
+    const prefix = getVariantValidationPrefix(entry, variantEntries.length);
     const option1Name = String(variant.option1Name || "").trim();
     const option1Value = String(variant.option1Value || "").trim();
+    const option2Name = String(variant.option2Name || "").trim();
+    const option2Value = String(variant.option2Value || "").trim();
+    const option3Name = String(variant.option3Name || "").trim();
+    const option3Value = String(variant.option3Value || "").trim();
+    const sku = String(variant.sku || "").trim();
+    const barcode = String(variant.barcode || "").trim();
     const price = String(variant.price || product.price || "").trim();
     const compareAtPrice = String(
       variant.compareAtPrice || product.compareAtPrice || ""
     ).trim();
+    const variantImageUrl = String(variant.variantImageUrl || "").trim();
 
     if (!option1Name) {
-      errors.push({ field: "variants", message: `${prefix} 的 Option1 name 不能为空。` });
+      addValidationIssue(errors, "variants", `${prefix} 的 Option1 名称不能为空。`, {
+        variantIndex: index
+      });
     }
 
     if (!option1Value) {
-      errors.push({ field: "variants", message: `${prefix} 的 Option1 value 不能为空。` });
+      addValidationIssue(errors, "variants", `${prefix} 的 Option1 值不能为空。`, {
+        variantIndex: index
+      });
+    }
+
+    if (option2Name && !option2Value) {
+      addValidationIssue(errors, "variants", `${prefix} 已填写 Option2 名称，但 Option2 值为空。`, {
+        variantIndex: index
+      });
+    }
+
+    if (!option2Name && option2Value) {
+      addValidationIssue(errors, "variants", `${prefix} 已填写 Option2 值，但 Option2 名称为空。`, {
+        variantIndex: index
+      });
+    }
+
+    if (option3Name && !option3Value) {
+      addValidationIssue(errors, "variants", `${prefix} 已填写 Option3 名称，但 Option3 值为空。`, {
+        variantIndex: index
+      });
+    }
+
+    if (!option3Name && option3Value) {
+      addValidationIssue(errors, "variants", `${prefix} 已填写 Option3 值，但 Option3 名称为空。`, {
+        variantIndex: index
+      });
+    }
+
+    if ((option3Name || option3Value) && (!option2Name || !option2Value)) {
+      addValidationIssue(
+        errors,
+        "variants",
+        `${prefix} 使用了 Option3，但 Option2 未完整填写。`,
+        { variantIndex: index }
+      );
+    }
+
+    if (!sku && variantEntries.length > 1) {
+      addValidationIssue(warnings, "variants", `${prefix} SKU 为空，建议使用“补齐 SKU”。`, {
+        variantIndex: index
+      });
     }
 
     if (!price) {
-      warnings.push({
-        field: "variants",
-        message: `${prefix} 价格为空，导出 CSV 时将使用 0.00。`
+      addValidationIssue(warnings, "variants", `${prefix} 价格为空，导出 CSV 时将使用 0.00。`, {
+        variantIndex: index
       });
     } else if (!isStrictPrice(price)) {
-      warnings.push({
-        field: "variants",
-        message: `${prefix} 价格格式建议为纯数字，例如 24.99。`
+      addValidationIssue(warnings, "variants", `${prefix} 价格格式建议为纯数字，例如 24.99。`, {
+        variantIndex: index
+      });
+    } else if (parseStrictPriceNumber(price) <= 0) {
+      addValidationIssue(warnings, "variants", `${prefix} 价格为 0 或负数，请确认是否正确。`, {
+        variantIndex: index
       });
     }
 
     if (compareAtPrice && !isStrictPrice(compareAtPrice)) {
-      warnings.push({
-        field: "variants",
-        message: `${prefix} 原价/对比价格式建议为纯数字，例如 39.99。`
+      addValidationIssue(
+        warnings,
+        "variants",
+        `${prefix} 原价/对比价格式建议为纯数字，例如 39.99。`,
+        { variantIndex: index }
+      );
+    } else if (
+      compareAtPrice &&
+      parseStrictPriceNumber(price) != null &&
+      parseStrictPriceNumber(compareAtPrice) != null &&
+      parseStrictPriceNumber(compareAtPrice) <= parseStrictPriceNumber(price)
+    ) {
+      addValidationIssue(warnings, "variants", `${prefix} 原价/对比价不高于售价，请确认。`, {
+        variantIndex: index
+      });
+    }
+
+    if (variantImageUrl && !/^https?:\/\//i.test(variantImageUrl)) {
+      addValidationIssue(warnings, "variants", `${prefix} 的变体图片不是 http/https URL。`, {
+        variantIndex: index
+      });
+    }
+
+    if (variantImageUrl && /^http:\/\//i.test(variantImageUrl)) {
+      addValidationIssue(warnings, "variants", `${prefix} 的变体图片不是 https，Shopify 可能无法稳定抓取。`, {
+        variantIndex: index
       });
     }
 
     if (
-      variant.variantImageUrl &&
-      !/^https?:\/\//i.test(String(variant.variantImageUrl).trim())
+      variantImageUrl &&
+      /^https?:\/\//i.test(variantImageUrl) &&
+      images.length &&
+      !isVariantImageInProductImages(variantImageUrl, imageKeys)
     ) {
-      warnings.push({
-        field: "variants",
-        message: `${prefix} 的变体图片不是 http/https URL。`
-      });
+      addValidationIssue(
+        warnings,
+        "variants",
+        `${prefix} 的变体图片不在商品图片列表中，导入后可能无法绑定。`,
+        { variantIndex: index }
+      );
     }
+
+    if (sku) {
+      const skuKey = sku.toLowerCase();
+      const existing = skuEntries.get(skuKey) || [];
+      existing.push(index);
+      skuEntries.set(skuKey, existing);
+    }
+
+    if (barcode) {
+      const barcodeKey = barcode.toLowerCase();
+      const existing = barcodeEntries.get(barcodeKey) || [];
+      existing.push(index);
+      barcodeEntries.set(barcodeKey, existing);
+    }
+
+    const optionKey = getVariantOptionCombinationKey(variant);
+    const existingOptions = optionCombinationEntries.get(optionKey) || [];
+    existingOptions.push(index);
+    optionCombinationEntries.set(optionKey, existingOptions);
+  });
+
+  skuEntries.forEach((indexes, sku) => {
+    if (indexes.length <= 1) {
+      return;
+    }
+
+    indexes.forEach((variantIndex) => {
+      addValidationIssue(
+        warnings,
+        "variants",
+        `变体 SKU 重复：${sku}（涉及 #${indexes.map((index) => index + 1).join("、#")}）。`,
+        { variantIndex }
+      );
+    });
+  });
+
+  barcodeEntries.forEach((indexes, barcode) => {
+    if (indexes.length <= 1) {
+      return;
+    }
+
+    indexes.forEach((variantIndex) => {
+      addValidationIssue(
+        warnings,
+        "variants",
+        `变体 Barcode 重复：${barcode}（涉及 #${indexes.map((index) => index + 1).join("、#")}）。`,
+        { variantIndex }
+      );
+    });
+  });
+
+  optionCombinationEntries.forEach((indexes) => {
+    if (indexes.length <= 1 || variantEntries.length <= 1) {
+      return;
+    }
+
+    indexes.forEach((variantIndex) => {
+      addValidationIssue(
+        errors,
+        "variants",
+        `变体选项组合重复（涉及 #${indexes.map((index) => index + 1).join("、#")}），Shopify 不允许重复变体。`,
+        { variantIndex }
+      );
+    });
   });
 
   if (!images.length) {
@@ -4774,6 +5027,7 @@ function renderValidationResults(result) {
 
   validationPanel.hidden = false;
   clearElement(validationList);
+  applyVariantValidationMarks(result);
 
   if (!totalIssues) {
     validationSummary.textContent = "校验通过";
@@ -4801,6 +5055,18 @@ function renderValidationResults(result) {
 }
 
 function focusValidationField(issue) {
+  if (Number.isInteger(issue?.variantIndex)) {
+    const item = variantList?.querySelector(
+      `.variant-item[data-variant-index="${issue.variantIndex}"]`
+    );
+
+    if (item) {
+      item.scrollIntoView({ block: "nearest" });
+      item.querySelector("input")?.focus({ preventScroll: true });
+      return;
+    }
+  }
+
   const fields = {
     title: productTitleInput,
     handle: productHandleInput,
@@ -4834,6 +5100,41 @@ function confirmRiskyExport(result) {
   return window.confirm(
     `导出前发现 ${result.warnings.length} 个风险：\n${warningText}${moreText}\n\n是否仍然导出 CSV？`
   );
+}
+
+function checkVariantFields() {
+  if (!currentProductDraft) {
+    setStatus("请先采集或恢复一个商品草稿", "error");
+    return;
+  }
+
+  clearValidationResults();
+  updateDraftFromForm();
+  currentProductDraft = normalizeDraft(currentProductDraft);
+  renderVariants(currentProductDraft.variants);
+
+  const validationResult = getExportValidation(currentProductDraft);
+  const variantErrors = validationResult.errors.filter((issue) => issue.field === "variants");
+  const variantWarnings = validationResult.warnings.filter((issue) => issue.field === "variants");
+
+  renderValidationResults({
+    errors: variantErrors,
+    warnings: variantWarnings
+  });
+
+  if (variantErrors.length) {
+    focusValidationField(variantErrors[0]);
+    setStatus(`发现 ${variantErrors.length} 个变体错误，请先修正`, "error");
+    return;
+  }
+
+  if (variantWarnings.length) {
+    focusValidationField(variantWarnings[0]);
+    setStatus(`发现 ${variantWarnings.length} 个变体风险，可按需修正`, "idle");
+    return;
+  }
+
+  setStatus("变体字段校验通过", "success");
 }
 
 function updateDraftFromForm() {
@@ -5749,6 +6050,7 @@ addSafeEventListener(includeSelectedVariantsButton, "click", () => {
 });
 addSafeEventListener(mergeDuplicateVariantsButton, "click", mergeDuplicateVariants);
 addSafeEventListener(fillVariantSkuButton, "click", fillVariantSkus);
+addSafeEventListener(checkVariantsButton, "click", checkVariantFields);
 addSafeEventListener(imageSelectAllButton, "click", () => {
   const checkboxes = Array.from(imageGrid.querySelectorAll(".image-select-checkbox"));
   setImageSelection(checkboxes.some((checkbox) => !checkbox.checked));

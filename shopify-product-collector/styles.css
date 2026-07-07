@@ -1265,6 +1265,21 @@ button.is-busy::after {
     rgba(255, 255, 255, 0.72);
 }
 
+.variant-item.has-validation-error {
+  border-color: rgba(180, 35, 24, 0.48);
+  background:
+    linear-gradient(90deg, rgba(180, 35, 24, 0.08), transparent 62%),
+    rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 2px rgba(180, 35, 24, 0.08);
+}
+
+.variant-item.has-validation-warning:not(.has-validation-error) {
+  border-color: rgba(170, 91, 0, 0.42);
+  background:
+    linear-gradient(90deg, rgba(170, 91, 0, 0.08), transparent 62%),
+    rgba(255, 255, 255, 0.88);
+}
+
 .variant-title-control {
   display: flex;
   min-width: 0;
