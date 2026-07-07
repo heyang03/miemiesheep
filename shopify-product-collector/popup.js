@@ -3150,6 +3150,7 @@ function syncImagePickerStatusToDraft() {
     currentImagePickerStatus.urlCount ?? currentImagePickerStatus.imageCount ?? urls.length
   );
   currentProductDraft.manualImageNodeCount = Number(currentImagePickerStatus.nodeCount || 0);
+  markImagesUserEdited();
   currentProductDraft.images = normalizeImages(
     urls.map((url) => ({
       url,
@@ -3408,6 +3409,7 @@ function deleteImageFromLightbox(index) {
 
   clearValidationResults();
   updateDraftFromForm();
+  markImagesUserEdited();
   currentProductDraft.images = normalizeImages(
     currentProductDraft.images.filter((_, imageIndex) => imageIndex !== index),
     currentProductDraft.title
@@ -3784,6 +3786,10 @@ async function filterSmallImages() {
   );
   const removedCount = beforeCount - currentProductDraft.images.length;
 
+  if (removedCount) {
+    markImagesUserEdited();
+  }
+
   renderImages(currentProductDraft.images);
   queueSaveDraft(removedCount ? `已过滤 ${removedCount} 张小图` : "没有需要过滤的小图");
   setStatus(removedCount ? `已过滤 ${removedCount} 张小图` : "没有需要过滤的小图", "success");
@@ -3832,6 +3838,10 @@ function filterDuplicateImages() {
   );
   const removedCount = beforeCount - currentProductDraft.images.length;
 
+  if (removedCount) {
+    markImagesUserEdited();
+  }
+
   renderImages(currentProductDraft.images);
   queueSaveDraft(removedCount ? `已过滤 ${removedCount} 张重复图片` : "没有重复图片");
   setStatus(removedCount ? `已过滤 ${removedCount} 张重复图片` : "没有重复图片", "success");
@@ -3861,6 +3871,10 @@ function fillImageAltText() {
       };
     }
   );
+
+  if (changedCount) {
+    markImagesUserEdited();
+  }
 
   renderImages(currentProductDraft.images);
   queueSaveDraft(changedCount ? `已补充 ${changedCount} 张图片 Alt` : "图片 Alt 已完整");
@@ -3917,6 +3931,10 @@ function replaceImageDomain() {
       }
     }
   );
+
+  if (changedCount) {
+    markImagesUserEdited();
+  }
 
   renderImages(currentProductDraft.images);
   clearValidationResults();
@@ -4081,6 +4099,7 @@ function deleteSelectedImages() {
 
   clearValidationResults();
   updateDraftFromForm();
+  markImagesUserEdited();
   currentProductDraft.images = normalizeImages(
     currentProductDraft.images.filter((_, index) => !selectedIndexes.has(index)),
     currentProductDraft.title
@@ -4113,6 +4132,7 @@ function moveImage(fromIndex, toIndex, message = "图片顺序已更新") {
 
   clearValidationResults();
   updateDraftFromForm();
+  markImagesUserEdited();
   const [image] = currentProductDraft.images.splice(fromIndex, 1);
   currentProductDraft.images.splice(toIndex, 0, image);
   currentProductDraft.images = normalizeImages(currentProductDraft.images, currentProductDraft.title);
@@ -4249,6 +4269,7 @@ function normalizeDraft(product) {
     imageCollectionMode: product.imageCollectionMode || "auto",
     manualImageCount: Number(product.manualImageCount || 0),
     manualImageNodeCount: Number(product.manualImageNodeCount || 0),
+    imagesUserEdited: Boolean(product.imagesUserEdited),
     chargeTax: product.chargeTax || "true",
     inventoryQuantity: product.inventoryQuantity || "0",
     continueSellingWhenOutOfStock:
@@ -4261,6 +4282,64 @@ function normalizeDraft(product) {
     variants,
     seoTitle: product.seoTitle || product.title || "",
     seoDescription: product.seoDescription || (product.description || "").slice(0, 320)
+  };
+}
+
+function markImagesUserEdited() {
+  if (currentProductDraft) {
+    currentProductDraft.imagesUserEdited = true;
+  }
+}
+
+function hasUserLockedImages(product = currentProductDraft) {
+  return Boolean(
+    product?.imagesUserEdited ||
+      product?.imageCollectionMode === "manual" ||
+      product?.imageSourceSelector
+  );
+}
+
+function productMatchesCollectionUrl(product, url) {
+  const productUrl = normalizePageUrl(product?.page?.url || pageUrlInput.value || "");
+  const collectionUrl = normalizePageUrl(url || "");
+
+  return Boolean(productUrl && collectionUrl && productUrl === collectionUrl);
+}
+
+function getImagePreservationSnapshot(collectionUrl) {
+  if (!currentProductDraft) {
+    return null;
+  }
+
+  updateDraftFromForm();
+  const draft = normalizeDraft(currentProductDraft);
+
+  if (!hasUserLockedImages(draft) || !productMatchesCollectionUrl(draft, collectionUrl)) {
+    return null;
+  }
+
+  return {
+    images: normalizeImages(draft.images, draft.title),
+    imageSourceSelector: draft.imageSourceSelector || "",
+    imageCollectionMode: draft.imageCollectionMode || "auto",
+    manualImageCount: Number(draft.manualImageCount || 0),
+    manualImageNodeCount: Number(draft.manualImageNodeCount || 0)
+  };
+}
+
+function applyPreservedImages(product, snapshot) {
+  if (!snapshot) {
+    return product;
+  }
+
+  return {
+    ...product,
+    images: snapshot.images,
+    imageSourceSelector: snapshot.imageSourceSelector,
+    imageCollectionMode: snapshot.imageCollectionMode,
+    manualImageCount: snapshot.manualImageCount,
+    manualImageNodeCount: snapshot.manualImageNodeCount,
+    imagesUserEdited: true
   };
 }
 
@@ -5289,6 +5368,7 @@ function renderImages(images) {
 
       clearValidationResults();
       updateDraftFromForm();
+      markImagesUserEdited();
       currentProductDraft.images.splice(index, 1);
       currentProductDraft.images = normalizeImages(
         currentProductDraft.images,
@@ -5336,6 +5416,7 @@ function renderImages(images) {
     renderImageCheckStatus(checkStatus, image.check);
     urlInput.addEventListener("input", () => {
       clearValidationResults();
+      markImagesUserEdited();
       if (!currentProductDraft.images[index]) {
         currentProductDraft.images[index] = {
           url: "",
@@ -5357,6 +5438,7 @@ function renderImages(images) {
     });
     altInput.addEventListener("input", () => {
       clearValidationResults();
+      markImagesUserEdited();
       if (!currentProductDraft.images[index]) {
         currentProductDraft.images[index] = {
           url: "",
@@ -5385,6 +5467,7 @@ function addManualImage() {
 
   updateDraftFromForm();
   clearValidationResults();
+  markImagesUserEdited();
   currentProductDraft.images = normalizeImages(currentProductDraft.images);
   currentProductDraft.images.push({
     url: "",
@@ -5672,6 +5755,7 @@ async function collectCurrentProduct() {
 
     currentTabUrl = tab.url || "";
     currentDraftKey = getDraftStorageKey(currentTabUrl);
+    const preservedImages = getImagePreservationSnapshot(currentTabUrl);
 
     const response = await sendMessageWithInjection(tab.id, {
       type: "SPC_COLLECT_PRODUCT",
@@ -5682,12 +5766,17 @@ async function collectCurrentProduct() {
       throw new Error(response?.error || "当前页面未返回有效商品信息");
     }
 
-    renderProduct(response.data);
+    renderProduct(applyPreservedImages(response.data, preservedImages));
     renderPageInfo(response.data.page || {});
     await saveDraft(currentProductDraft);
 
     const result = getProductStatusMessage(currentProductDraft);
-    setStatus(result.message, result.type);
+    setStatus(
+      preservedImages
+        ? `${result.message}，已保留手动筛选的图片区域`
+        : result.message,
+      result.type
+    );
 
     if (currentProductDraft.images?.length) {
       await checkCurrentImages({ auto: true });
@@ -5825,6 +5914,7 @@ async function resetImageCollectionMode() {
       currentProductDraft.imageCollectionMode = "auto";
       currentProductDraft.manualImageCount = 0;
       currentProductDraft.manualImageNodeCount = 0;
+      currentProductDraft.imagesUserEdited = false;
       if (imageSourceInfo) {
         imageSourceInfo.textContent = "自动";
       }

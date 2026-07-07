@@ -2979,9 +2979,97 @@
     return input.closest("label");
   }
 
+  function getFirstAttributeValue(element, attributes = []) {
+    for (const attribute of attributes) {
+      const value = element?.getAttribute?.(attribute);
+
+      if (cleanText(value)) {
+        return cleanText(value);
+      }
+    }
+
+    return "";
+  }
+
+  function getFirstDescendantAttributeValue(element, attributes = []) {
+    const selector = attributes.map((attribute) => `[${attribute}]`).join(",");
+    const matchedElement = selector
+      ? element?.querySelector?.(selector)
+      : null;
+
+    return getFirstAttributeValue(matchedElement, attributes);
+  }
+
+  function getDomOptionAttributeValue(element, attributes = []) {
+    return (
+      getFirstAttributeValue(element, attributes) ||
+      getFirstDescendantAttributeValue(element, attributes)
+    );
+  }
+
+  function getDomOptionSku(element) {
+    const sku = getDomOptionAttributeValue(element, [
+      "data-sku",
+      "data-variant-sku",
+      "data-product-sku",
+      "data-item-sku",
+      "sku"
+    ]);
+
+    if (sku) {
+      return sku;
+    }
+
+    const text = cleanText(element?.innerText || element?.textContent || "");
+    const match = text.match(/\b(?:sku|item\s*#|model)\s*[:#-]?\s*([a-z0-9][a-z0-9._-]{2,})\b/i);
+
+    return cleanText(match?.[1]);
+  }
+
+  function getDomOptionBarcode(element) {
+    return getDomOptionAttributeValue(element, [
+      "data-barcode",
+      "data-variant-barcode",
+      "data-upc",
+      "data-ean",
+      "barcode"
+    ]);
+  }
+
+  function getDomOptionVariantId(element) {
+    return getDomOptionAttributeValue(element, [
+      "data-variant-id",
+      "data-product-variant-id",
+      "data-variant",
+      "data-id",
+      "value"
+    ]);
+  }
+
+  function isLikelyDomVariantIdentifier(value) {
+    const text = cleanText(value);
+
+    return /^\d{6,}$/.test(text) || /^gid:\/\//i.test(text);
+  }
+
   function getDomOptionText(control) {
     if (!control) {
       return "";
+    }
+
+    const attributeValue = getFirstAttributeValue(control, [
+      "data-option-value",
+      "data-variant-value",
+      "data-value",
+      "data-title",
+      "data-name",
+      "data-label",
+      "aria-label",
+      "title"
+    ]);
+
+    if (attributeValue && !isLikelyDomVariantIdentifier(attributeValue)) {
+      return cleanDomOptionValue(attributeValue);
     }
 
     if (control.matches?.("option")) {
@@ -3098,12 +3186,20 @@
       "button",
       "[role='radio']",
       "[data-option-value]",
-      "[data-value]"
+      "[data-variant-value]",
+      "[data-variant-id]",
+      "[data-product-variant-id]",
+      "[data-variant]",
+      "[data-value]",
+      "[data-sku][data-price]",
+      "[data-sku][data-variant-price]"
     ];
 
     if (elementHasSubscriptionVariantSignal(group)) {
       selectors.push(
         "label",
+        "[data-variant-id]",
+        "[data-product-variant-id]",
         "[data-selling-plan]",
         "[data-selling-plan-id]",
         "[data-selling-plan-option]",
@@ -3125,6 +3221,10 @@
           "button",
           "[role='radio']",
           "[data-option-value]",
+          "[data-variant-value]",
+          "[data-variant-id]",
+          "[data-product-variant-id]",
+          "[data-variant]",
           "[data-value]",
           "[data-selling-plan]",
           "[data-selling-plan-id]",
@@ -3154,15 +3254,22 @@
       }
 
       const value = getDomOptionText(control);
+      const optionRoot = getDomOptionRoot(control);
+      const sku = getDomOptionSku(optionRoot);
+      const barcode = getDomOptionBarcode(optionRoot);
+      const variantId = getDomOptionVariantId(optionRoot);
+      const key = [value, variantId, sku].filter(Boolean).join("|").toLowerCase();
 
-      if (!value || isBlockedDomOptionText(value) || seen.has(value.toLowerCase())) {
+      if (!value || isBlockedDomOptionText(value) || seen.has(key || value.toLowerCase())) {
         return;
       }
 
-      seen.add(value.toLowerCase());
-      const optionRoot = getDomOptionRoot(control);
+      seen.add(key || value.toLowerCase());
       options.push({
         value,
+        sku,
+        barcode,
+        variantId,
         imageUrl: getDomOptionImageUrl(control),
         ...getDomOptionPriceInfo(optionRoot)
       });
@@ -3183,9 +3290,20 @@
       "[data-subscription]",
       "[data-product-options]",
       "[data-product-option]",
+      "[data-variant-options]",
+      "[data-variant-picker]",
+      "[data-variant-selector]",
+      "[data-option-selector]",
+      "variant-radios",
+      "variant-selects",
+      "select[name='id']",
+      "select[name*='variant' i]",
       "[class*='selling-plan']",
       "[class*='subscription']",
       "[class*='delivery-frequency']",
+      "[class*='variant-picker']",
+      "[class*='variant-selector']",
+      "[class*='option-selector']",
       "[class*='variant'][class*='option']",
       "[class*='product'][class*='option']",
       "[class*='swatch']"
@@ -3196,7 +3314,7 @@
     document.querySelectorAll(selectors.join(", ")).forEach((group) => {
       const options = collectDomOptionControls(group);
 
-      if (options.length < 2 || options.length > 12) {
+      if (options.length < 2) {
         return;
       }
 
@@ -3223,11 +3341,54 @@
         label: isSubscriptionGroup
           ? normalizeSubscriptionGroupLabel(label, groups.length === 0 ? "Purchase Option" : `Option${groups.length + 1}`)
           : label,
+        isComposite: isCompositeDomVariantGroup(group, options),
         options
       });
     });
 
     return groups.slice(0, 3);
+  }
+
+  function isCompositeDomVariantGroup(group, options = []) {
+    if (!group) {
+      return false;
+    }
+
+    const isVariantSelect =
+      group.matches?.("select[name='id'], select[name*='variant' i]") ||
+      Boolean(group.querySelector?.("select[name='id'], select[name*='variant' i]"));
+    const values = options.map((option) => cleanText(option.value));
+
+    return Boolean(
+      isVariantSelect &&
+        values.length >= 2 &&
+        values.some((value) => /\s(?:\/|\||·|•)\s/.test(value))
+    );
+  }
+
+  function splitCompositeDomOptionValue(value) {
+    const text = cleanText(value);
+
+    if (!text || !/\s(?:\/|\||·|•)\s/.test(text)) {
+      return [text].filter(Boolean);
+    }
+
+    const parts = text
+      .split(/\s*(?:\/|\||·|•)\s*/)
+      .map(cleanDomOptionValue)
+      .filter(Boolean)
+      .filter((part) => !extractMoneyValues(part).length)
+      .slice(0, 3);
+
+    return parts.length >= 2 ? parts : [text];
+  }
+
+  function getDomVariantValues(groups, selected) {
+    if (groups.length === 1 && groups[0]?.isComposite) {
+      return splitCompositeDomOptionValue(selected[0]?.value);
+    }
+
+    return selected.map((option) => option.value);
   }
 
   function buildDomVariantsFromGroups(groups) {
@@ -3242,16 +3403,19 @@
         const priceOption = [...selected].reverse().find((option) => option.price);
         const compareOption = [...selected].reverse().find((option) => option.compareAtPrice);
         const imageOption = selected.find((option) => option.imageUrl);
+        const skuOption = [...selected].reverse().find((option) => option.sku);
+        const barcodeOption = [...selected].reverse().find((option) => option.barcode);
+        const variantValues = getDomVariantValues(groups, selected);
 
         variants.push({
-          sku: "",
-          barcode: "",
+          sku: skuOption?.sku || "",
+          barcode: barcodeOption?.barcode || "",
           option1Name: groups[0]?.label || "Option",
-          option1Value: selected[0]?.value || `Variant ${variants.length + 1}`,
-          option2Name: groups[1]?.label || "",
-          option2Value: selected[1]?.value || "",
-          option3Name: groups[2]?.label || "",
-          option3Value: selected[2]?.value || "",
+          option1Value: variantValues[0] || `Variant ${variants.length + 1}`,
+          option2Name: groups[1]?.label || (variantValues[1] ? "Option2" : ""),
+          option2Value: variantValues[1] || "",
+          option3Name: groups[2]?.label || (variantValues[2] ? "Option3" : ""),
+          option3Value: variantValues[2] || "",
           price: priceOption?.price || "",
           compareAtPrice: compareOption?.compareAtPrice || "",
           variantImageUrl: imageOption?.imageUrl || ""
@@ -3268,8 +3432,167 @@
     return variants;
   }
 
+  function getDomVariantListScore(variants = []) {
+    return variants.reduce((score, variant) => {
+      let nextScore = score + 4;
+
+      if (variant.sku) {
+        nextScore += 8;
+      }
+
+      if (variant.price) {
+        nextScore += 6;
+      }
+
+      if (variant.compareAtPrice) {
+        nextScore += 3;
+      }
+
+      if (variant.variantImageUrl) {
+        nextScore += 4;
+      }
+
+      if (variant.option2Value) {
+        nextScore += 3;
+      }
+
+      if (variant.option3Value) {
+        nextScore += 2;
+      }
+
+      return nextScore;
+    }, 0);
+  }
+
+  function getDynamicDomVariantRootSelector() {
+    return [
+      "variant-radios",
+      "variant-selects",
+      "[data-product-options]",
+      "[data-product-option]",
+      "[data-variant-options]",
+      "[data-variant-picker]",
+      "[data-variant-selector]",
+      "[data-option-selector]",
+      "[data-selling-plan-group]",
+      "[data-selling-plans]",
+      "[data-subscription-options]",
+      "[class*='variant-picker']",
+      "[class*='variant-selector']",
+      "[class*='option-selector']",
+      "[class*='product-options']",
+      "[class*='product-form']",
+      "[class*='product__info']",
+      "[class*='product-info']"
+    ].join(", ");
+  }
+
+  function hasDynamicDomVariantControlShape(element) {
+    return Boolean(
+      element?.matches?.(
+        "button, label, option, [role='radio'], [aria-checked], [data-value], [data-variant-value], [data-variant-id], [data-product-variant-id], [data-variant], [data-option-value], [data-selling-plan], [data-selling-plan-id], [data-subscription-option], [data-subscription-plan]"
+      )
+    );
+  }
+
+  function shouldUseDynamicDomCardGroup(root, items = [], variants = []) {
+    const rootSignal = /variant|option|swatch|selector|selling|subscription|plan|frequency|product-form/i.test(
+      getElementSignalText(root)
+    );
+    const dataSignalCount = items.filter(
+      (item) =>
+        getDomOptionVariantId(item) ||
+        getDomOptionSku(item) ||
+        getDomOptionBarcode(item)
+    ).length;
+    const controlCount = items.filter(hasDynamicDomVariantControlShape).length;
+    const enrichedCount = variants.filter(
+      (variant) => variant.price || variant.variantImageUrl || variant.sku
+    ).length;
+
+    return Boolean(
+      rootSignal ||
+        dataSignalCount >= 2 ||
+        controlCount >= 2 ||
+        enrichedCount >= 2
+    );
+  }
+
+  function collectDynamicDomCardVariants() {
+    const groups = [];
+    const seenRoots = new Set();
+
+    document.querySelectorAll(getDynamicDomVariantRootSelector()).forEach((root) => {
+      if (seenRoots.has(root)) {
+        return;
+      }
+
+      seenRoots.add(root);
+      const items = findRuleVariantItems(root);
+
+      if (items.length < 2) {
+        return;
+      }
+
+      const optionName = getDomGroupLabel(root, 0) || "Option";
+      const variants = dedupeRuleVariants(
+        items.map((item, index) => {
+          const priceInfo = getRuleVariantPriceInfo(item);
+
+          return {
+            sku: getDomOptionSku(item),
+            barcode: getDomOptionBarcode(item),
+            option1Name: optionName,
+            option1Value: getRuleVariantLabel(item, index),
+            option2Name: "",
+            option2Value: "",
+            option3Name: "",
+            option3Value: "",
+            price: priceInfo.price,
+            compareAtPrice: priceInfo.compareAtPrice,
+            variantImageUrl: getRuleVariantImageUrl(item, index)
+          };
+        })
+      ).filter((variant) => variant.option1Value && !isBlockedDomOptionText(variant.option1Value));
+
+      if (variants.length < 2) {
+        return;
+      }
+
+      if (!shouldUseDynamicDomCardGroup(root, items, variants)) {
+        return;
+      }
+
+      groups.push({
+        variants,
+        score:
+          getDomVariantListScore(variants) +
+          variants.length * 2 +
+          (root.matches?.("[data-variant-options], [data-variant-picker], [data-variant-selector], variant-radios, variant-selects")
+            ? 20
+            : 0)
+      });
+    });
+
+    return groups.sort((left, right) => right.score - left.score)[0]?.variants || [];
+  }
+
   function collectDomVariants() {
-    return buildDomVariantsFromGroups(collectDomVariantGroups());
+    const groupVariants = dedupeRuleVariants(buildDomVariantsFromGroups(collectDomVariantGroups()));
+    const cardVariants = collectDynamicDomCardVariants();
+
+    if (!groupVariants.length) {
+      return cardVariants;
+    }
+
+    if (
+      cardVariants.length &&
+      getDomVariantListScore(cardVariants) > getDomVariantListScore(groupVariants)
+    ) {
+      return cardVariants;
+    }
+
+    return groupVariants;
   }
 
   function normalizePrice(value) {
@@ -3698,7 +4021,10 @@
   function getRuleVariantLabel(element, index) {
     const attributeLabel = [
       element.getAttribute?.("aria-label"),
+      element.getAttribute?.("data-option-value"),
+      element.getAttribute?.("data-variant-value"),
       element.getAttribute?.("data-value"),
+      element.getAttribute?.("data-label"),
       element.getAttribute?.("data-title"),
       element.getAttribute?.("data-name"),
       element.getAttribute?.("title"),
@@ -3736,22 +4062,27 @@
 
   function getRuleVariantItemScore(element) {
     const text = getRuleVariantItemText(element);
+    const label = getRuleVariantLabel(element, 0);
 
-    if (!text || text.length > 1400) {
+    if ((!text && !label) || text.length > 1400) {
       return 0;
     }
 
     const prices = extractRuleMoneyValues(text);
-    const label = getRuleVariantLabel(element, 0);
+    const variantDataSignal = Boolean(
+      getDomOptionVariantId(element) ||
+        getDomOptionSku(element) ||
+        getDomOptionBarcode(element)
+    );
     const hasControlShape = element.matches?.(
-      "button, label, option, [role='radio'], [aria-checked], [data-value], [data-variant], [data-option-value], [data-selling-plan], [data-selling-plan-id], [data-subscription-option], [data-subscription-plan]"
+      "button, label, option, [role='radio'], [aria-checked], [data-value], [data-variant-value], [data-variant-id], [data-product-variant-id], [data-variant], [data-option-value], [data-selling-plan], [data-selling-plan-id], [data-subscription-option], [data-subscription-plan]"
     );
     const hasVariantWords =
       hasSubscriptionVariantText(text) ||
       /\b(month|supply|pack|count|size|color|colour|flavo[u]?r|kit|bundle|ritual|bottle|bag|serving|week|oz|ml|g)\b/i.test(text);
     const hasImages = Boolean(inspectImagesInElement(element).urls.length);
 
-    if (!prices.length && !hasControlShape && !hasVariantWords && !hasImages) {
+    if (!prices.length && !hasControlShape && !hasVariantWords && !hasImages && !variantDataSignal) {
       return 0;
     }
 
@@ -3759,7 +4090,7 @@
       return 0;
     }
 
-    return prices.length * 18 + (hasImages ? 10 : 0) + (hasVariantWords ? 8 : 0) + (hasControlShape ? 6 : 0);
+    return prices.length * 18 + (hasImages ? 10 : 0) + (hasVariantWords ? 8 : 0) + (hasControlShape ? 6 : 0) + (variantDataSignal ? 12 : 0);
   }
 
   function findRuleVariantItems(root) {
@@ -3781,7 +4112,7 @@
         }))
         .filter((item) => item.score > 0);
 
-      if (items.length < 2 || items.length > 12) {
+      if (items.length < 2) {
         return;
       }
 
@@ -3812,8 +4143,8 @@
       const priceInfo = getRuleVariantPriceInfo(item);
 
       return {
-        sku: "",
-        barcode: "",
+        sku: getDomOptionSku(item),
+        barcode: getDomOptionBarcode(item),
         option1Name: optionName,
         option1Value: getRuleVariantLabel(item, index),
         option2Name: "",
@@ -3830,7 +4161,7 @@
   function collectRuleVariantsFromControls(root) {
     const options = collectDomOptionControls(root);
 
-    if (options.length < 2 || options.length > 12) {
+    if (options.length < 2) {
       return [];
     }
 
