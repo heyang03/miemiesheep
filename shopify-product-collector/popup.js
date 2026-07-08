@@ -15,6 +15,11 @@ const batchHeader = batchTitleToggle?.closest(".accordion-header");
 const batchSummary = document.getElementById("batchSummary");
 const batchCount = document.getElementById("batchCount");
 const batchUrlInput = document.getElementById("batchUrlInput");
+const batchCategoryUrlInput = document.getElementById("batchCategoryUrlInput");
+const batchCategoryNameInput = document.getElementById("batchCategoryNameInput");
+const batchCategoryTypeInput = document.getElementById("batchCategoryTypeInput");
+const batchCategoryTagsInput = document.getElementById("batchCategoryTagsInput");
+const discoverCategoryUrlsButton = document.getElementById("discoverCategoryUrlsButton");
 const discoverBatchUrlsButton = document.getElementById("discoverBatchUrlsButton");
 const prepareBatchButton = document.getElementById("prepareBatchButton");
 const precheckBatchButton = document.getElementById("precheckBatchButton");
@@ -28,6 +33,8 @@ const deleteSelectedBatchButton = document.getElementById("deleteSelectedBatchBu
 const fixDuplicateHandlesButton = document.getElementById("fixDuplicateHandlesButton");
 const clearBatchButton = document.getElementById("clearBatchButton");
 const batchTimeoutInput = document.getElementById("batchTimeoutInput");
+const batchConcurrencyInput = document.getElementById("batchConcurrencyInput");
+const batchDiscoveryPageLimitInput = document.getElementById("batchDiscoveryPageLimitInput");
 const batchProgressText = document.getElementById("batchProgressText");
 const batchProgressBar = document.getElementById("batchProgressBar");
 const batchSearchInput = document.getElementById("batchSearchInput");
@@ -158,6 +165,12 @@ const SITE_RULE_STORAGE_PREFIX = "spc:site-rule:";
 const BATCH_TAB_LOAD_TIMEOUT_MS = 35000;
 const MIN_BATCH_TIMEOUT_SECONDS = 8;
 const MAX_BATCH_TIMEOUT_SECONDS = 90;
+const DEFAULT_BATCH_CONCURRENCY = 2;
+const MIN_BATCH_CONCURRENCY = 1;
+const MAX_BATCH_CONCURRENCY = 4;
+const DEFAULT_DISCOVERY_PAGE_LIMIT = 5;
+const MIN_DISCOVERY_PAGE_LIMIT = 1;
+const MAX_DISCOVERY_PAGE_LIMIT = 20;
 const IMAGE_SCROLL_THRESHOLD = 8;
 const BATCH_PREVIEW_HYDRATE_CONCURRENCY = 3;
 const IMAGE_CHECK_TIMEOUT_MS = 10000;
@@ -463,6 +476,32 @@ async function getCurrentTab() {
   return tab;
 }
 
+async function syncCurrentTabContext() {
+  const tab = await getCurrentTab();
+
+  if (!tab?.id) {
+    throw new Error("没有找到当前活动标签页");
+  }
+
+  const nextUrl = tab.url || "";
+  const didChange = normalizePageUrl(nextUrl) !== normalizePageUrl(currentTabUrl);
+
+  currentTabUrl = nextUrl;
+  currentDraftKey = getDraftStorageKey(currentTabUrl);
+  renderPageInfo({
+    title: tab.title || "",
+    url: currentTabUrl
+  });
+  primeCategoryUrlFromCurrentTab(currentTabUrl);
+
+  if (didChange) {
+    currentImagePickerStatus = null;
+    await refreshSiteRulePanel();
+  }
+
+  return tab;
+}
+
 function renderPageInfo(pageInfo) {
   const title = pageInfo.title || "尚未采集";
   const url = pageInfo.url || "尚未采集";
@@ -609,6 +648,32 @@ function getBatchTimeoutMs() {
   return getBatchTimeoutSeconds() * 1000;
 }
 
+function getBatchConcurrency() {
+  const value = Number(batchConcurrencyInput?.value || DEFAULT_BATCH_CONCURRENCY);
+
+  if (!Number.isFinite(value)) {
+    return DEFAULT_BATCH_CONCURRENCY;
+  }
+
+  return Math.max(
+    MIN_BATCH_CONCURRENCY,
+    Math.min(MAX_BATCH_CONCURRENCY, Math.round(value))
+  );
+}
+
+function getBatchDiscoveryPageLimit() {
+  const value = Number(batchDiscoveryPageLimitInput?.value || DEFAULT_DISCOVERY_PAGE_LIMIT);
+
+  if (!Number.isFinite(value)) {
+    return DEFAULT_DISCOVERY_PAGE_LIMIT;
+  }
+
+  return Math.max(
+    MIN_DISCOVERY_PAGE_LIMIT,
+    Math.min(MAX_DISCOVERY_PAGE_LIMIT, Math.round(value))
+  );
+}
+
 function normalizeCollectorSettings(settings = {}) {
   return {
     amazonFollowVariantPages: Boolean(settings.amazonFollowVariantPages)
@@ -707,7 +772,13 @@ function saveBatchState() {
       selectedIds: Array.from(selectedBatchItemIds),
       logs: batchLogs,
       settings: {
-        timeoutSeconds: getBatchTimeoutSeconds()
+        timeoutSeconds: getBatchTimeoutSeconds(),
+        concurrency: getBatchConcurrency(),
+        discoveryPageLimit: getBatchDiscoveryPageLimit(),
+        categoryUrl: cleanText(batchCategoryUrlInput?.value),
+        categoryName: cleanText(batchCategoryNameInput?.value),
+        categoryType: cleanText(batchCategoryTypeInput?.value),
+        categoryTags: cleanText(batchCategoryTagsInput?.value)
       },
       savedAt: new Date().toISOString()
     }
@@ -735,6 +806,63 @@ function normalizeBatchUrl(value) {
   }
 }
 
+function getUrlHostLabel(url, fallback = "当前页面") {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, "") || fallback;
+  } catch (error) {
+    return fallback;
+  }
+}
+
+function titleCaseSlug(value) {
+  return cleanText(value)
+    .replace(/\.[a-z0-9]+$/i, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+}
+
+function inferCategoryNameFromUrl(url) {
+  try {
+    const parsedUrl = new URL(url);
+    const segments = parsedUrl.pathname.split("/").filter(Boolean);
+    const leaf = segments[segments.length - 1] || parsedUrl.hostname;
+
+    return titleCaseSlug(leaf);
+  } catch (error) {
+    return "";
+  }
+}
+
+function isCollectionPageUrl(url) {
+  try {
+    return /\/collections?\//i.test(new URL(url).pathname);
+  } catch (error) {
+    return false;
+  }
+}
+
+function primeCategoryUrlFromCurrentTab(url) {
+  const normalizedUrl = normalizeBatchUrl(url);
+
+  if (!normalizedUrl || !isCollectionPageUrl(normalizedUrl)) {
+    return;
+  }
+
+  const currentCategoryUrl = normalizeBatchUrl(batchCategoryUrlInput?.value || "");
+  const shouldReplace =
+    !currentCategoryUrl || getDomain(currentCategoryUrl) !== getDomain(normalizedUrl);
+
+  if (!shouldReplace) {
+    return;
+  }
+
+  batchCategoryUrlInput.value = normalizedUrl;
+
+  if (!batchCategoryNameInput.value.trim()) {
+    batchCategoryNameInput.value = inferCategoryNameFromUrl(normalizedUrl);
+  }
+}
+
 function parseBatchUrls(value) {
   const seen = new Set();
 
@@ -751,6 +879,26 @@ function parseBatchUrls(value) {
     });
 }
 
+function mergeBatchTags(...values) {
+  return normalizeBatchTags(values.filter(Boolean).join(", "));
+}
+
+function getBatchCategoryMetadata(defaultName = "") {
+  const categoryName = cleanText(
+    batchCategoryNameInput?.value ||
+      inferCategoryNameFromUrl(batchCategoryUrlInput?.value || "") ||
+      defaultName
+  );
+  const categoryType = cleanText(batchCategoryTypeInput?.value || categoryName);
+  const categoryTags = mergeBatchTags(categoryName, batchCategoryTagsInput?.value);
+
+  return {
+    categoryName,
+    categoryType,
+    categoryTags
+  };
+}
+
 function normalizeDiscoveredBatchItems(itemsOrUrls) {
   return (Array.isArray(itemsOrUrls) ? itemsOrUrls : [])
     .map((item) => {
@@ -764,14 +912,24 @@ function normalizeDiscoveredBatchItems(itemsOrUrls) {
       return {
         url,
         title: cleanText(rawItem.title),
-        previewImageUrl: String(rawItem.previewImageUrl || "").trim()
+        previewImageUrl: String(rawItem.previewImageUrl || "").trim(),
+        categoryName: cleanText(rawItem.categoryName),
+        categoryType: cleanText(rawItem.categoryType),
+        categoryTags: normalizeBatchTags(rawItem.categoryTags)
       };
     })
     .filter(Boolean);
 }
 
-function mergeBatchUrls(itemsOrUrls) {
-  const discoveredItems = normalizeDiscoveredBatchItems(itemsOrUrls);
+function mergeBatchUrls(itemsOrUrls, metadata = {}) {
+  const discoveredItems = normalizeDiscoveredBatchItems(itemsOrUrls).map((item) => ({
+    ...metadata,
+    ...item,
+    categoryName: item.categoryName || metadata.categoryName || "",
+    categoryType: item.categoryType || metadata.categoryType || "",
+    categoryTags: mergeBatchTags(metadata.categoryTags, item.categoryTags)
+  }));
+  const discoveredUrls = discoveredItems.map((item) => item.url);
   const existingUrls = parseBatchUrls(
     [batchUrlInput.value, ...batchItems.map((item) => item.url)].join("\n")
   );
@@ -791,11 +949,17 @@ function mergeBatchUrls(itemsOrUrls) {
   let updatedPreviewCount = 0;
   batchItems = batchItems.map((item) => {
     const discoveredItem = discoveredItems.find((candidate) => candidate.url === item.url);
+    const hasCategoryUpdate =
+      discoveredItem?.categoryName ||
+      discoveredItem?.categoryType ||
+      discoveredItem?.categoryTags;
 
     if (
       !discoveredItem ||
-      (!discoveredItem.previewImageUrl && !discoveredItem.title) ||
-      (item.previewImageUrl && (!discoveredItem.title || item.title !== "待采集"))
+      (!discoveredItem.previewImageUrl && !discoveredItem.title && !hasCategoryUpdate) ||
+      (item.previewImageUrl &&
+        !hasCategoryUpdate &&
+        (!discoveredItem.title || item.title !== "待采集"))
     ) {
       return item;
     }
@@ -805,9 +969,12 @@ function mergeBatchUrls(itemsOrUrls) {
       ...item,
       title:
         item.title && item.title !== "待采集"
-          ? item.title
-          : discoveredItem.title || item.title,
-      previewImageUrl: item.previewImageUrl || discoveredItem.previewImageUrl
+          ? compactUiText(item.title, 120)
+          : compactUiText(discoveredItem.title || item.title, 120),
+      previewImageUrl: item.previewImageUrl || discoveredItem.previewImageUrl,
+      categoryName: item.categoryName || discoveredItem.categoryName || "",
+      categoryType: item.categoryType || discoveredItem.categoryType || "",
+      categoryTags: mergeBatchTags(item.categoryTags, discoveredItem.categoryTags)
     };
   });
 
@@ -820,7 +987,8 @@ function mergeBatchUrls(itemsOrUrls) {
     return {
       added: 0,
       total: mergedUrls.length,
-      updated: updatedPreviewCount
+      updated: updatedPreviewCount,
+      urls: discoveredUrls
     };
   }
 
@@ -846,7 +1014,8 @@ function mergeBatchUrls(itemsOrUrls) {
   return {
     added: newItems.length,
     total: mergedUrls.length,
-    updated: updatedPreviewCount
+    updated: updatedPreviewCount,
+    urls: discoveredUrls
   };
 }
 
@@ -1122,14 +1291,43 @@ async function tryCollectShopifyAjaxFromUrl(productUrl, timeoutMs = getBatchTime
   }
 }
 
+function htmlToCompactUiText(value) {
+  const text = String(value || "");
+
+  if (!/[<>]/.test(text)) {
+    return cleanText(text);
+  }
+
+  const element = document.createElement("div");
+  element.innerHTML = text;
+  const altText = Array.from(element.querySelectorAll("[alt]"))
+    .map((candidate) => cleanText(candidate.getAttribute("alt")))
+    .find(Boolean);
+
+  return cleanText(altText || element.textContent);
+}
+
+function compactUiText(value, maxLength = 120) {
+  const text = htmlToCompactUiText(value);
+
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return `${text.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
 function createBatchItem(url, index = 0, metadata = {}) {
   return {
     id: `${Date.now()}-${index}-${hashString(url)}`,
     url,
     status: "pending",
-    title: metadata.title || "待采集",
+    title: compactUiText(metadata.title, 120) || "待采集",
     previewImageUrl: metadata.previewImageUrl || "",
     previewStatus: metadata.previewImageUrl ? "loaded" : "",
+    categoryName: metadata.categoryName || "",
+    categoryType: metadata.categoryType || "",
+    categoryTags: normalizeBatchTags(metadata.categoryTags),
     source: "",
     handle: "",
     error: "",
@@ -1172,7 +1370,7 @@ function normalizeBatchItems(items) {
           : "",
         precheckMessage: item?.precheckMessage || "",
         httpStatus: Number(item?.httpStatus || 0),
-        title: item?.title || item?.product?.title || "待采集",
+        title: compactUiText(item?.title || item?.product?.title, 120) || "待采集",
         previewImageUrl:
           item?.previewImageUrl ||
           item?.product?.images?.find((image) => image?.url)?.url ||
@@ -1183,6 +1381,9 @@ function normalizeBatchItems(items) {
             : item?.previewStatus === "error"
               ? "error"
               : "",
+        categoryName: cleanText(item?.categoryName),
+        categoryType: cleanText(item?.categoryType),
+        categoryTags: normalizeBatchTags(item?.categoryTags),
         source: item?.source || item?.product?.source || "",
         handle: item?.handle || item?.product?.handle || "",
         warningCount: Number(item?.warningCount || 0),
@@ -1199,9 +1400,9 @@ function normalizeBatchLogs(logs) {
       level: ["info", "success", "warning", "error"].includes(log?.level)
         ? log.level
         : "info",
-      message: cleanText(log?.message),
-      title: cleanText(log?.title),
-      url: cleanText(log?.url),
+      message: compactUiText(log?.message, 180),
+      title: compactUiText(log?.title, 100),
+      url: compactUiText(log?.url, 140),
       time: log?.time || new Date().toISOString()
     }))
     .filter((log) => log.message)
@@ -1245,6 +1446,24 @@ function normalizeBatchTags(value) {
       (candidate) => candidate.toLowerCase() === tag.toLowerCase()
     ) === index)
     .join(", ");
+}
+
+function applyBatchCategoryMetadata(product, item) {
+  const categoryName = cleanText(item?.categoryName);
+  const categoryType = cleanText(item?.categoryType || categoryName);
+  const categoryTags = mergeBatchTags(categoryName, item?.categoryTags);
+
+  if (!categoryType && !categoryTags) {
+    return product;
+  }
+
+  const draft = normalizeDraft(product);
+
+  return normalizeDraft({
+    ...draft,
+    type: categoryType || draft.type || "",
+    tags: mergeBatchTags(draft.tags, categoryTags)
+  });
 }
 
 function getBatchItemRisks(item) {
@@ -1380,9 +1599,9 @@ function addBatchLog(level, message, item = null) {
     {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       level,
-      message,
-      title: item?.title || item?.product?.title || "",
-      url: item?.url || "",
+      message: compactUiText(message, 180),
+      title: compactUiText(item?.title || item?.product?.title, 100),
+      url: compactUiText(item?.url, 140),
       time: new Date().toISOString()
     }
   ].slice(-80);
@@ -1406,6 +1625,10 @@ function createBatchStat(label, value, tone = "neutral") {
 }
 
 function renderBatchReport() {
+  if (!batchReportPanel || !batchReportStats || !batchReportSummary) {
+    return;
+  }
+
   clearElement(batchReportStats);
 
   if (!batchItems.length) {
@@ -1561,8 +1784,10 @@ function renderBatchLog() {
       time.textContent = Number.isNaN(date.getTime())
         ? ""
         : date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-      message.textContent = log.message;
-      context.textContent = log.title || log.url || "";
+      message.textContent = compactUiText(log.message, 180);
+      message.title = log.message || "";
+      context.textContent = compactUiText(log.title || log.url, 120);
+      context.title = log.title || log.url || "";
       item.append(time, message, context);
       batchLogList.appendChild(item);
     });
@@ -1581,6 +1806,9 @@ function getBatchSearchValues(item, index = 0) {
     item.handle,
     item.source,
     item.error,
+    item.categoryName,
+    item.categoryType,
+    item.categoryTags,
     getBatchItemStatusLabel(item),
     `#${index + 1}`,
     product.title,
@@ -1595,6 +1823,17 @@ function getBatchSearchValues(item, index = 0) {
 
 function batchItemMatchesSearch(item, index = 0, query = getBatchSearchQuery()) {
   return fuzzySearchMatches(query, getBatchSearchValues(item, index));
+}
+
+function getBatchCategoryLabel(item) {
+  const categoryName = cleanText(item?.categoryName);
+  const categoryType = cleanText(item?.categoryType);
+
+  if (categoryName && categoryType && categoryName !== categoryType) {
+    return `分类：${categoryName} / ${categoryType}`;
+  }
+
+  return categoryName || categoryType ? `分类：${categoryName || categoryType}` : "";
 }
 
 function getVisibleBatchItems() {
@@ -1635,9 +1874,10 @@ function updateBatchControls() {
     ? "正在按顺序采集队列，当前商品完成后可停止。"
     : stats.total
       ? `${stats.success} 个成功，${stats.error} 个失败，可继续采集或导出成功商品。`
-      : "粘贴商品链接，一行一个；采集完成后可合并导出 Shopify CSV。";
+      : "粘贴商品链接或按分类页发现商品；采集完成后可合并导出 Shopify CSV。";
 
   discoverBatchUrlsButton.disabled = isBatchCollecting;
+  discoverCategoryUrlsButton.disabled = isBatchCollecting;
   prepareBatchButton.disabled = isBatchCollecting;
   precheckBatchButton.disabled = isBatchCollecting || isBatchPrechecking || !stats.total;
   precheckBatchButton.textContent = isBatchPrechecking ? "检查中" : "预检查链接";
@@ -1691,6 +1931,8 @@ function renderBatchQueue() {
     const meta = document.createElement("div");
     const actions = document.createElement("div");
     const risks = getBatchItemRisks(item);
+    const displayTitle = compactUiText(item.title, 120) || `商品 #${index + 1}`;
+    const fullTitle = htmlToCompactUiText(item.title) || item.url;
 
     article.className = "batch-item";
     article.classList.toggle("is-search-hidden", !matchesSearch);
@@ -1712,11 +1954,11 @@ function renderBatchQueue() {
     preview.dataset.batchId = item.id;
     preview.setAttribute("role", "button");
     preview.setAttribute("tabindex", "0");
-    preview.setAttribute("aria-label", `打开 ${item.title || item.url}`);
+    preview.setAttribute("aria-label", `打开 ${displayTitle || item.url}`);
     if (item.previewImageUrl) {
       const previewImage = document.createElement("img");
       previewImage.src = item.previewImageUrl;
-      previewImage.alt = item.title || "商品预览";
+      previewImage.alt = displayTitle || "商品预览";
       previewImage.loading = "lazy";
       preview.appendChild(previewImage);
     } else {
@@ -1732,23 +1974,32 @@ function renderBatchQueue() {
     actions.className = "batch-item-actions";
 
     status.textContent = getBatchItemStatusLabel(item);
-    title.textContent = item.title || `商品 #${index + 1}`;
+    title.textContent = displayTitle;
+    title.title = fullTitle;
     title.dataset.batchAction = "open";
     title.dataset.batchId = item.id;
     title.setAttribute("role", "button");
     title.setAttribute("tabindex", "0");
-    title.setAttribute("aria-label", `打开 ${item.title || item.url}`);
+    title.setAttribute("aria-label", `打开 ${displayTitle || item.url}`);
     url.textContent = item.url;
 
+    const categoryLabel = getBatchCategoryLabel(item);
+
     if (item.status === "success") {
-      meta.textContent = `${item.source || "自动"} · ${item.rowCount || 0} 行 · ${item.warningCount || 0} 风险`;
+      meta.textContent = [
+        categoryLabel,
+        `${item.source || "自动"} · ${item.rowCount || 0} 行 · ${item.warningCount || 0} 风险`
+      ].filter(Boolean).join(" · ");
     } else if (item.status === "error") {
       const errorTypeLabel = getBatchErrorTypeLabel(item.errorType);
-      meta.textContent = `${errorTypeLabel ? `${errorTypeLabel} · ` : ""}${item.error || "采集失败"}`;
+      meta.textContent = [
+        categoryLabel,
+        `${errorTypeLabel ? `${errorTypeLabel} · ` : ""}${item.error || "采集失败"}`
+      ].filter(Boolean).join(" · ");
     } else if (item.previewStatus === "loading") {
-      meta.textContent = "正在通过 Shopify API 补充预览图";
+      meta.textContent = [categoryLabel, "正在通过 Shopify API 补充预览图"].filter(Boolean).join(" · ");
     } else {
-      meta.textContent = "等待后台标签页采集";
+      meta.textContent = [categoryLabel, "等待后台标签页采集"].filter(Boolean).join(" · ");
     }
 
     selector.append(checkbox, selectorText);
@@ -1839,7 +2090,9 @@ function prepareBatchQueue() {
     return;
   }
 
-  batchItems = urls.map(createBatchItem);
+  const categoryMetadata = getBatchCategoryMetadata();
+
+  batchItems = urls.map((url, index) => createBatchItem(url, index, categoryMetadata));
   selectedBatchItemIds = new Set();
   renderBatchQueue();
   saveBatchState();
@@ -1847,21 +2100,27 @@ function prepareBatchQueue() {
   setStatus(`已生成 ${batchItems.length} 个商品的批量采集队列`, "success");
 }
 
-function getBatchPreviewHydrationCandidates() {
+function getBatchPreviewHydrationCandidates(options = {}) {
+  const urlFilter = new Set(
+    (Array.isArray(options.urls) ? options.urls : [])
+      .map(normalizeBatchUrl)
+      .filter(Boolean)
+  );
+
   return batchItems.filter(
     (item) =>
+      (!urlFilter.size || urlFilter.has(item.url)) &&
       !item.previewImageUrl &&
       item.status !== "success" &&
-      item.previewStatus !== "loading" &&
-      Boolean(getShopifyAjaxUrlFromProductUrl(item.url))
+      item.previewStatus !== "loading"
   );
 }
 
-function applyBatchPreviewProduct(item, product) {
-  const previewImageUrl = product?.images?.find((image) => image?.url)?.url || "";
+function applyBatchPreviewData(item, preview = {}) {
+  const previewImageUrl = String(preview.previewImageUrl || "").trim();
 
-  if (product?.title) {
-    item.title = product.title;
+  if (preview.title) {
+    item.title = compactUiText(preview.title, 120);
   }
 
   if (previewImageUrl) {
@@ -1876,6 +2135,39 @@ function applyBatchPreviewProduct(item, product) {
   return false;
 }
 
+function applyBatchPreviewProduct(item, product) {
+  return applyBatchPreviewData(item, {
+    title: product?.title,
+    previewImageUrl: product?.images?.find((image) => image?.url)?.url || ""
+  });
+}
+
+async function collectBatchPreviewFromUrl(url) {
+  const timeoutMs = getBatchTimeoutMs();
+  const tab = await createBatchTab(url);
+
+  try {
+    await waitForBatchTabLoad(tab.id, timeoutMs);
+    await delay(650);
+
+    const response = await withTimeout(
+      sendMessageWithInjection(tab.id, {
+        type: "SPC_COLLECT_PRODUCT_PREVIEW"
+      }),
+      timeoutMs,
+      "商品预览采集超时"
+    );
+
+    if (!response?.ok) {
+      throw createCollectError("page", response?.error || "商品预览采集失败");
+    }
+
+    return response.data || {};
+  } finally {
+    await removeBatchTab(tab?.id);
+  }
+}
+
 async function hydrateBatchPreviewItem(itemId) {
   const item = batchItems.find((candidate) => candidate.id === itemId);
 
@@ -1884,14 +2176,36 @@ async function hydrateBatchPreviewItem(itemId) {
   }
 
   try {
-    const product = await tryCollectShopifyAjaxFromUrl(item.url);
+    let didUpdate = false;
+    const shopifyAjaxUrl = getShopifyAjaxUrlFromProductUrl(item.url);
+
+    if (shopifyAjaxUrl) {
+      try {
+        const product = await tryCollectShopifyAjaxFromUrl(item.url);
+        const latestItem = batchItems.find((candidate) => candidate.id === itemId);
+
+        if (!latestItem) {
+          return false;
+        }
+
+        didUpdate = applyBatchPreviewProduct(latestItem, product);
+
+        if (didUpdate) {
+          return true;
+        }
+      } catch (error) {
+        // Fall through to lightweight page preview for non-standard Shopify URLs.
+      }
+    }
+
+    const preview = await collectBatchPreviewFromUrl(item.url);
     const latestItem = batchItems.find((candidate) => candidate.id === itemId);
 
     if (!latestItem) {
       return false;
     }
 
-    return applyBatchPreviewProduct(latestItem, product);
+    return applyBatchPreviewData(latestItem, preview);
   } catch (error) {
     const latestItem = batchItems.find((candidate) => candidate.id === itemId);
 
@@ -1904,12 +2218,12 @@ async function hydrateBatchPreviewItem(itemId) {
   }
 }
 
-async function hydrateBatchPreviews(sourceLabel = "当前页面") {
+async function hydrateBatchPreviews(sourceLabel = "当前页面", options = {}) {
   if (isBatchPreviewHydrating) {
     return;
   }
 
-  const candidates = getBatchPreviewHydrationCandidates();
+  const candidates = getBatchPreviewHydrationCandidates(options);
 
   if (!candidates.length) {
     return;
@@ -1950,31 +2264,315 @@ async function hydrateBatchPreviews(sourceLabel = "当前页面") {
   }
 
   if (updatedCount) {
-    addBatchLog("success", `已通过 Shopify API 为 ${updatedCount} 个商品补充预览图`);
+    addBatchLog("success", `已异步为 ${updatedCount} 个待采集商品补充预览图`);
     setStatus(`已为 ${updatedCount} 个商品补充预览图`, "success");
   } else {
-    addBatchLog("warning", `扫描 ${sourceLabel}：未能通过 Shopify API 补充预览图`);
+    addBatchLog("warning", `扫描 ${sourceLabel}：未能补充待采集商品预览图`);
   }
 }
 
-async function discoverBatchUrlsFromCurrentPage() {
+async function discoverProductUrlsFromTab(tabId) {
+  return sendMessageWithInjection(tabId, {
+    type: "SPC_DISCOVER_PRODUCT_URLS"
+  });
+}
+
+async function settleBatchDiscoveryTab(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: async () => {
+        const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+        const getPageHeight = () =>
+          Math.max(
+            document.body?.scrollHeight || 0,
+            document.documentElement?.scrollHeight || 0
+          );
+        const getLabel = (element) =>
+          [
+            element?.innerText,
+            element?.textContent,
+            element?.getAttribute?.("aria-label"),
+            element?.getAttribute?.("title"),
+            element?.value
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .replace(/\s+/g, " ")
+            .trim();
+        const isVisible = (element) => {
+          if (!element || element.disabled || element.getAttribute("aria-disabled") === "true") {
+            return false;
+          }
+
+          const rect = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+
+          return (
+            rect.width > 2 &&
+            rect.height > 2 &&
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            Number(style.opacity || 1) > 0
+          );
+        };
+        const isLoadMoreControl = (element) => {
+          const label = getLabel(element);
+
+          if (!label || label.length > 80) {
+            return false;
+          }
+
+          if (/\b(add to cart|buy now|subscribe|filter|sort|menu|search|cart|wishlist)\b/i.test(label)) {
+            return false;
+          }
+
+          const href = element.getAttribute?.("href") || "";
+          const isSafeLink =
+            !href ||
+            href === "#" ||
+            href.startsWith("javascript:") ||
+            href.startsWith("void(0)");
+
+          return (
+            isSafeLink &&
+            /\b(load\s*more|show\s*more|view\s*more|more\s*products)\b|加载更多|查看更多|显示更多/i.test(
+              label
+            )
+          );
+        };
+        const clickLoadMoreControl = async () => {
+          const candidates = Array.from(
+            document.querySelectorAll(
+              "button, [role='button'], input[type='button'], input[type='submit'], a[href]"
+            )
+          );
+          const control = candidates.find(
+            (element) => isVisible(element) && isLoadMoreControl(element)
+          );
+
+          if (!control) {
+            return false;
+          }
+
+          control.scrollIntoView({ block: "center", inline: "nearest" });
+          await wait(150);
+          control.click();
+          await wait(900);
+          return true;
+        };
+
+        let lastHeight = 0;
+        let idleRounds = 0;
+
+        for (let index = 0; index < 8; index += 1) {
+          const beforeHeight = getPageHeight();
+
+          window.scrollTo(0, beforeHeight);
+          await wait(450);
+          const clickedLoadMore = await clickLoadMoreControl();
+          const afterHeight = getPageHeight();
+
+          if (!clickedLoadMore && afterHeight <= lastHeight + 4) {
+            idleRounds += 1;
+          } else {
+            idleRounds = 0;
+          }
+
+          if (idleRounds >= 2) {
+            break;
+          }
+
+          lastHeight = afterHeight;
+        }
+
+        window.scrollTo(0, 0);
+        await wait(120);
+      }
+    });
+  } catch (error) {
+    // Some pages block scripted scrolling; discovery can still use static DOM data.
+  }
+}
+
+async function discoverProductUrlsFromSingleUrl(url) {
+  const timeoutMs = getBatchTimeoutMs();
+  const tab = await createBatchTab(url);
+
+  try {
+    await waitForBatchTabLoad(tab.id, timeoutMs);
+    await delay(900);
+    await settleBatchDiscoveryTab(tab.id);
+
+    return withTimeout(
+      discoverProductUrlsFromTab(tab.id),
+      timeoutMs,
+      "分类页商品链接发现超时"
+    );
+  } finally {
+    await removeBatchTab(tab?.id);
+  }
+}
+
+function getDiscoveryPaginationCandidates(data = {}) {
+  return [
+    data.nextPageUrl,
+    ...(Array.isArray(data.paginationUrls) ? data.paginationUrls : [])
+  ]
+    .map(normalizeBatchUrl)
+    .filter(Boolean);
+}
+
+function mergeDiscoveredResponseItems(itemsByUrl, data = {}) {
+  const discoveredItems = normalizeDiscoveredBatchItems(
+    Array.isArray(data.items) ? data.items : data.urls
+  );
+  let addedCount = 0;
+
+  discoveredItems.forEach((item) => {
+    const existing = itemsByUrl.get(item.url);
+
+    if (!existing) {
+      itemsByUrl.set(item.url, item);
+      addedCount += 1;
+      return;
+    }
+
+    itemsByUrl.set(item.url, {
+      ...existing,
+      title: existing.title || item.title,
+      previewImageUrl: existing.previewImageUrl || item.previewImageUrl,
+      categoryName: existing.categoryName || item.categoryName,
+      categoryType: existing.categoryType || item.categoryType,
+      categoryTags: mergeBatchTags(existing.categoryTags, item.categoryTags)
+    });
+  });
+
+  return addedCount;
+}
+
+async function discoverProductUrlsFromUrl(url) {
+  const maxPages = getBatchDiscoveryPageLimit();
+  const startUrl = normalizeBatchUrl(url);
+  const queue = [startUrl];
+  const visited = new Set();
+  const itemsByUrl = new Map();
+  const pageSummaries = [];
+  let firstData = null;
+  let anchorCount = 0;
+  let stoppedOnEmptyPage = false;
+
+  while (queue.length && pageSummaries.length < maxPages) {
+    const pageUrl = queue.shift();
+
+    if (!pageUrl || visited.has(pageUrl)) {
+      continue;
+    }
+
+    visited.add(pageUrl);
+
+    const response = await discoverProductUrlsFromSingleUrl(pageUrl);
+
+    if (!response?.ok) {
+      if (!firstData) {
+        return response;
+      }
+
+      break;
+    }
+
+    const data = response.data || {};
+
+    if (!firstData) {
+      firstData = data;
+    }
+
+    const addedCount = mergeDiscoveredResponseItems(itemsByUrl, data);
+    const pageUrlCount = Array.isArray(data.urls) ? data.urls.length : 0;
+    anchorCount += Number(data.anchorCount || 0);
+    pageSummaries.push({
+      url: pageUrl,
+      found: pageUrlCount,
+      added: addedCount
+    });
+
+    if (addedCount === 0 && pageSummaries.length > 1) {
+      stoppedOnEmptyPage = true;
+      break;
+    }
+
+    getDiscoveryPaginationCandidates(data).forEach((candidateUrl) => {
+      if (!visited.has(candidateUrl) && !queue.includes(candidateUrl)) {
+        queue.push(candidateUrl);
+      }
+    });
+  }
+
+  const items = Array.from(itemsByUrl.values());
+  const urls = items.map((item) => item.url);
+
+  return {
+    ok: true,
+    data: {
+      ...(firstData || {}),
+      urls,
+      items,
+      anchorCount,
+      pageCount: pageSummaries.length,
+      pageLimit: maxPages,
+      pageSummaries,
+      stoppedOnEmptyPage,
+      hasMorePages: queue.length > 0
+    }
+  };
+}
+
+function getDiscoveryPageSummaryText(data = {}) {
+  const pageCount = Number(data.pageCount || 1);
+
+  if (pageCount <= 1) {
+    return "";
+  }
+
+  return data.hasMorePages
+    ? `，已扫描 ${pageCount} 页（达到上限 ${data.pageLimit || pageCount} 页）`
+    : `，已扫描 ${pageCount} 页`;
+}
+
+async function discoverBatchUrlsFromCurrentPage(options = {}) {
   if (isBatchCollecting) {
     return;
   }
 
-  discoverBatchUrlsButton.disabled = true;
-  setStatus("正在从当前页面发现商品链接...", "loading");
+  const isCategoryMode = Boolean(options.category);
+  const triggerButton = isCategoryMode ? discoverCategoryUrlsButton : discoverBatchUrlsButton;
+  const typedCategoryUrl = cleanText(batchCategoryUrlInput?.value);
+  const categoryUrl = isCategoryMode && typedCategoryUrl ? normalizeBatchUrl(typedCategoryUrl) : "";
+
+  if (isCategoryMode && typedCategoryUrl && !categoryUrl) {
+    setStatus("分类页 URL 无效，请填写完整的 http/https 链接", "error");
+    return;
+  }
+
+  triggerButton.disabled = true;
+  setStatus(
+    isCategoryMode
+      ? categoryUrl
+        ? `正在后台扫描分类页：${getUrlHostLabel(categoryUrl)}，最多 ${getBatchDiscoveryPageLimit()} 页...`
+        : "正在从当前分类页发现商品链接..."
+      : "正在从当前页面发现商品链接...",
+    "loading"
+  );
 
   try {
-    const tab = await getCurrentTab();
+    let response;
 
-    if (!tab?.id) {
-      throw new Error("没有找到当前活动标签页");
+    if (categoryUrl) {
+      response = await discoverProductUrlsFromUrl(categoryUrl);
+    } else {
+      const tab = await syncCurrentTabContext();
+      response = await discoverProductUrlsFromTab(tab.id);
     }
-
-    const response = await sendMessageWithInjection(tab.id, {
-      type: "SPC_DISCOVER_PRODUCT_URLS"
-    });
 
     if (!response?.ok) {
       throw new Error(response?.error || "当前页面未返回商品链接");
@@ -1984,47 +2582,63 @@ async function discoverBatchUrlsFromCurrentPage() {
       ? response.data.items
       : response.data?.urls;
     const urls = Array.isArray(response.data?.urls) ? response.data.urls : [];
-    const result = mergeBatchUrls(discoveredItems);
-    const sourceLabel = response.data?.sourceLabel || "当前页面";
+    const sourceLabel =
+      response.data?.sourceLabel ||
+      (categoryUrl ? `分类页 ${getUrlHostLabel(categoryUrl)}` : "当前页面");
+    const pageSummaryText = getDiscoveryPageSummaryText(response.data);
+    const categoryMetadata = isCategoryMode
+      ? getBatchCategoryMetadata(
+          response.data?.page?.title || inferCategoryNameFromUrl(categoryUrl) || sourceLabel
+        )
+      : {};
+    const result = mergeBatchUrls(discoveredItems, categoryMetadata);
+    const hydrateOptions = { urls: result.urls || urls };
 
     if (!urls.length) {
-      setStatus("当前页面未发现商品链接，可切换到商品列表页或 Collection 页", "error");
+      setStatus(
+        isCategoryMode
+          ? "分类页未发现商品链接，请确认该 URL 是商品列表页或 Shopify Collection 页"
+          : "当前页面未发现商品链接，可切换到商品列表页或 Collection 页",
+        "error"
+      );
       return;
     }
 
     if (!result.added) {
       if (result.updated) {
         setStatus(
-          `已扫描 ${sourceLabel}，无新增链接，已更新 ${result.updated} 个商品预览图`,
+          `已扫描 ${sourceLabel}${pageSummaryText}，无新增链接，已更新 ${result.updated} 个商品预览图`,
           "success"
         );
         addBatchLog(
           "success",
-          `扫描 ${sourceLabel}：无新增，更新 ${result.updated} 个商品预览图`
+          `扫描 ${sourceLabel}${pageSummaryText}：无新增，更新 ${result.updated} 个商品预览图`
         );
-        hydrateBatchPreviews(sourceLabel);
+        hydrateBatchPreviews(sourceLabel, hydrateOptions);
         return;
       }
 
-      setStatus(`已扫描 ${sourceLabel}，发现 ${urls.length} 个链接，均已在队列中`, "idle");
-      addBatchLog("info", `扫描 ${sourceLabel}：发现 ${urls.length} 个链接，无新增`);
-      hydrateBatchPreviews(sourceLabel);
+      setStatus(`已扫描 ${sourceLabel}${pageSummaryText}，发现 ${urls.length} 个链接，均已在队列中`, "idle");
+      addBatchLog("info", `扫描 ${sourceLabel}${pageSummaryText}：发现 ${urls.length} 个链接，无新增`);
+      hydrateBatchPreviews(sourceLabel, hydrateOptions);
       return;
     }
 
     addBatchLog(
       "success",
-      `扫描 ${sourceLabel}：新增 ${result.added} 个商品链接，队列共 ${result.total} 个`
+      `${isCategoryMode ? `分类 ${categoryMetadata.categoryName || sourceLabel}` : `扫描 ${sourceLabel}`}${pageSummaryText}：新增 ${result.added} 个商品链接，队列共 ${result.total} 个`
     );
     setStatus(
-      `已从${sourceLabel}新增 ${result.added} 个商品链接，队列共 ${result.total} 个`,
+      isCategoryMode
+        ? `已从分类 ${categoryMetadata.categoryName || sourceLabel}${pageSummaryText} 新增 ${result.added} 个商品链接，队列共 ${result.total} 个`
+        : `已从${sourceLabel}${pageSummaryText}新增 ${result.added} 个商品链接，队列共 ${result.total} 个`,
       "success"
     );
-    hydrateBatchPreviews(sourceLabel);
+    hydrateBatchPreviews(sourceLabel, hydrateOptions);
   } catch (error) {
     setStatus(error.message || "发现商品链接失败", "error");
   } finally {
-    discoverBatchUrlsButton.disabled = isBatchCollecting;
+    triggerButton.disabled = isBatchCollecting;
   }
 }
 
@@ -2271,6 +2885,53 @@ function updateBatchItemError(item, error) {
   item.updatedAt = new Date().toISOString();
 }
 
+async function collectBatchItem(item) {
+  item.status = "running";
+  item.error = "";
+  item.updatedAt = new Date().toISOString();
+  addBatchLog("info", "开始采集", item);
+  renderBatchQueue();
+  await saveBatchState();
+
+  try {
+    const precheck = await precheckBatchItem(item);
+
+    if (precheck.status === "error") {
+      throw createCollectError(
+        "precheck",
+        `链接预检查失败：${precheck.message}`,
+        { httpStatus: precheck.httpStatus }
+      );
+    }
+
+    let product = await collectProductFromBatchUrl(item.url);
+    product = applyBatchCategoryMetadata(product, item);
+    product = await checkProductImages(product);
+    updateBatchItemFromProduct(item, product);
+    const imageStats = getImageCheckStats(product.images);
+    const imageRiskCount = imageStats.invalid + imageStats.small;
+    const imageCheckText = imageStats.total
+      ? `，图片 ${imageStats.valid} 有效/${imageRiskCount} 风险`
+      : "";
+    addBatchLog(
+      "success",
+      `采集成功${imageCheckText}，生成 ${item.rowCount || 0} 行 CSV 数据`,
+      item
+    );
+    setStatus(`已采集并检查：${product.title || item.url}`, "success");
+  } catch (error) {
+    const classifiedError = classifyCollectError(error);
+    error.message = classifiedError.message;
+    error.collectType = classifiedError.type;
+    updateBatchItemError(item, error);
+    addBatchLog("error", `采集失败：${item.error}`, item);
+    setStatus(`批量采集失败：${item.error}`, "error");
+  }
+
+  renderBatchQueue();
+  await saveBatchState();
+}
+
 async function startBatchCollection() {
   if (isBatchCollecting) {
     return;
@@ -2290,64 +2951,35 @@ async function startBatchCollection() {
   isBatchCollecting = true;
   shouldStopBatchCollection = false;
   renderBatchQueue();
-  addBatchLog("info", "开始批量采集，将跳过已完成商品并继续未完成队列");
-  setStatus("开始批量采集，优先使用 Shopify API 直采", "loading");
+  const concurrency = getBatchConcurrency();
+  const collectableSnapshots = batchItems.filter((item) => item.status !== "success");
+  let nextIndex = 0;
+  addBatchLog(
+    "info",
+    `开始批量采集，并发 ${concurrency}，将跳过已完成商品并继续未完成队列`
+  );
+  setStatus(`开始批量采集，并发 ${concurrency}，优先使用 Shopify API 直采`, "loading");
 
-  for (const itemSnapshot of [...batchItems]) {
-    if (shouldStopBatchCollection) {
-      break;
-    }
+  async function worker() {
+    while (!shouldStopBatchCollection && nextIndex < collectableSnapshots.length) {
+      const itemSnapshot = collectableSnapshots[nextIndex];
+      nextIndex += 1;
+      const item = batchItems.find((candidate) => candidate.id === itemSnapshot.id);
 
-    const item = batchItems.find((candidate) => candidate.id === itemSnapshot.id);
-
-    if (!item || item.status === "success") {
-      continue;
-    }
-
-    item.status = "running";
-    item.error = "";
-    item.updatedAt = new Date().toISOString();
-    addBatchLog("info", "开始采集", item);
-    renderBatchQueue();
-    await saveBatchState();
-
-    try {
-      const precheck = await precheckBatchItem(item);
-
-      if (precheck.status === "error") {
-        throw createCollectError(
-          "precheck",
-          `链接预检查失败：${precheck.message}`,
-          { httpStatus: precheck.httpStatus }
-        );
+      if (!item || item.status === "success" || item.status === "running") {
+        continue;
       }
 
-      let product = await collectProductFromBatchUrl(item.url);
-      product = await checkProductImages(product);
-      updateBatchItemFromProduct(item, product);
-      const imageStats = getImageCheckStats(product.images);
-      const imageRiskCount = imageStats.invalid + imageStats.small;
-      const imageCheckText = imageStats.total
-        ? `，图片 ${imageStats.valid} 有效/${imageRiskCount} 风险`
-        : "";
-      addBatchLog(
-        "success",
-        `采集成功${imageCheckText}，生成 ${item.rowCount || 0} 行 CSV 数据`,
-        item
-      );
-      setStatus(`已采集并检查：${product.title || item.url}`, "success");
-    } catch (error) {
-      const classifiedError = classifyCollectError(error);
-      error.message = classifiedError.message;
-      error.collectType = classifiedError.type;
-      updateBatchItemError(item, error);
-      addBatchLog("error", `采集失败：${item.error}`, item);
-      setStatus(`批量采集失败：${item.error}`, "error");
+      await collectBatchItem(item);
     }
-
-    renderBatchQueue();
-    await saveBatchState();
   }
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(concurrency, collectableSnapshots.length) },
+      worker
+    )
+  );
 
   isBatchCollecting = false;
   shouldStopBatchCollection = false;
@@ -2367,8 +2999,8 @@ function stopBatchCollection() {
   }
 
   shouldStopBatchCollection = true;
-  addBatchLog("warning", "已请求停止，当前商品采集完成后暂停队列");
-  setStatus("已请求停止，当前商品采集完成后会暂停队列", "idle");
+  addBatchLog("warning", "已请求停止，当前正在采集的任务完成后暂停队列");
+  setStatus("已请求停止，当前正在采集的任务完成后会暂停队列", "idle");
 }
 
 function getBatchProducts(options = {}) {
@@ -2686,6 +3318,60 @@ async function clearCurrentDomainImagePicker() {
   }
 }
 
+function resetCurrentProductWorkspaceUi() {
+  closeOpenCompactMenus();
+
+  [
+    productTitleInput,
+    productPriceInput,
+    productCompareAtPriceInput,
+    productSkuInput,
+    productVendorInput,
+    productTypeInput,
+    productTagsInput,
+    productHandleInput,
+    productDescriptionInput,
+    variantSearchInput,
+    batchCategoryUrlInput,
+    batchCategoryNameInput,
+    batchCategoryTypeInput,
+    batchCategoryTagsInput,
+    imageReplaceFromInput,
+    imageReplaceToInput
+  ].filter(Boolean).forEach((input) => {
+    input.value = "";
+  });
+
+  productStatusSelect.value = "active";
+  productPublishedSelect.value = "false";
+  imageSourceFilter.value = "all";
+
+  productPanel.hidden = true;
+  sourceBadge.textContent = "未采集";
+  cacheHint.textContent = "尚未缓存草稿";
+  imageSourceInfo.textContent = "自动";
+
+  renderImages([]);
+  clearElement(variantList);
+
+  const emptyVariants = document.createElement("p");
+  emptyVariants.className = "empty-state";
+  emptyVariants.textContent = "尚未采集变体。";
+  variantList.appendChild(emptyVariants);
+
+  variantCount.textContent = "0/0 导出";
+  variantPanel?.classList.remove("has-scrollable-variants");
+  variantList.tabIndex = -1;
+  variantList.setAttribute("aria-label", "变体列表");
+
+  if (typeof updateAmazonVariantGalleryToolbar === "function") {
+    updateAmazonVariantGalleryToolbar();
+  }
+  updateVariantSelectionToolbar();
+  updateVariantDuplicateToolbar([]);
+  updateVariantSkuToolbar([]);
+}
+
 async function resetAllState() {
   if (isBatchCollecting) {
     setStatus("批量采集中，请先停止后再重置", "error");
@@ -2722,10 +3408,11 @@ async function resetAllState() {
     selectedBatchItemIds = new Set();
     batchLogs = [];
     batchUrlInput.value = "";
-    productPanel.hidden = true;
+    resetCurrentProductWorkspaceUi();
     updateSiteTypeBadge();
     clearValidationResults();
     renderBatchQueue();
+    renderBatchLog();
     updateExportAvailability();
     setStatus("已重置当前草稿、批量队列和当前域名选图区域", "success");
   } catch (error) {
@@ -2921,6 +3608,33 @@ function clearElement(element) {
   while (element.firstChild) {
     element.removeChild(element.firstChild);
   }
+}
+
+function closeOpenCompactMenus(exceptMenu = null) {
+  document.querySelectorAll(".compact-menu[open], .more-actions[open]").forEach((menu) => {
+    if (menu !== exceptMenu) {
+      menu.open = false;
+    }
+  });
+}
+
+function bindMenuDismiss() {
+  document.addEventListener("click", (event) => {
+    const menu = event.target.closest?.(".compact-menu, .more-actions");
+
+    if (menu) {
+      closeOpenCompactMenus(menu);
+      return;
+    }
+
+    closeOpenCompactMenus();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeOpenCompactMenus();
+    }
+  });
 }
 
 function clearValidationResults() {
@@ -3954,6 +4668,7 @@ function updateImageCheckToolbar() {
 
   if (!stats.total) {
     checkImagesButton.disabled = true;
+    checkImagesButton.textContent = "检查图片";
     filterSmallImagesButton.disabled = true;
     filterDuplicateImagesButton.disabled = true;
     fillImageAltButton.disabled = true;
@@ -6331,14 +7046,7 @@ async function collectCurrentProduct() {
   setStatus("正在采集当前页面商品信息...", "loading");
 
   try {
-    const tab = await getCurrentTab();
-
-    if (!tab || !tab.id) {
-      throw new Error("没有找到当前活动标签页");
-    }
-
-    currentTabUrl = tab.url || "";
-    currentDraftKey = getDraftStorageKey(currentTabUrl);
+    const tab = await syncCurrentTabContext();
     const preservedImages = getImagePreservationSnapshot(currentTabUrl);
 
     const response = await sendMessageWithInjection(tab.id, {
@@ -6735,6 +7443,25 @@ async function initializePopup() {
     if (cachedBatch?.settings?.timeoutSeconds) {
       batchTimeoutInput.value = String(cachedBatch.settings.timeoutSeconds);
     }
+    if (cachedBatch?.settings?.concurrency) {
+      batchConcurrencyInput.value = String(cachedBatch.settings.concurrency);
+    }
+    if (cachedBatch?.settings?.discoveryPageLimit) {
+      batchDiscoveryPageLimitInput.value = String(cachedBatch.settings.discoveryPageLimit);
+    }
+    if (cachedBatch?.settings?.categoryUrl) {
+      batchCategoryUrlInput.value = cachedBatch.settings.categoryUrl;
+    }
+    if (cachedBatch?.settings?.categoryName) {
+      batchCategoryNameInput.value = cachedBatch.settings.categoryName;
+    }
+    if (cachedBatch?.settings?.categoryType) {
+      batchCategoryTypeInput.value = cachedBatch.settings.categoryType;
+    }
+    if (cachedBatch?.settings?.categoryTags) {
+      batchCategoryTagsInput.value = cachedBatch.settings.categoryTags;
+    }
+    primeCategoryUrlFromCurrentTab(currentTabUrl);
     batchItems = normalizeBatchItems(cachedBatch?.items);
     selectedBatchItemIds = new Set(
       (Array.isArray(cachedBatch?.selectedIds) ? cachedBatch.selectedIds : []).filter((id) =>
@@ -6797,6 +7524,9 @@ siteRuleClearButtons.forEach((button) => {
   });
 });
 addSafeEventListener(discoverBatchUrlsButton, "click", discoverBatchUrlsFromCurrentPage);
+addSafeEventListener(discoverCategoryUrlsButton, "click", () =>
+  discoverBatchUrlsFromCurrentPage({ category: true })
+);
 addSafeEventListener(prepareBatchButton, "click", prepareBatchQueue);
 addSafeEventListener(precheckBatchButton, "click", precheckBatchQueue);
 addSafeEventListener(startBatchButton, "click", startBatchCollection);
@@ -6814,6 +7544,24 @@ addSafeEventListener(batchTimeoutInput, "change", () => {
   batchTimeoutInput.value = String(getBatchTimeoutSeconds());
   saveBatchState();
   setStatus(`采集超时已设置为 ${getBatchTimeoutSeconds()} 秒`, "success");
+});
+addSafeEventListener(batchConcurrencyInput, "change", () => {
+  batchConcurrencyInput.value = String(getBatchConcurrency());
+  saveBatchState();
+  setStatus(`批量采集并发数已设置为 ${getBatchConcurrency()}`, "success");
+});
+addSafeEventListener(batchDiscoveryPageLimitInput, "change", () => {
+  batchDiscoveryPageLimitInput.value = String(getBatchDiscoveryPageLimit());
+  saveBatchState();
+  setStatus(`分类发现页数上限已设置为 ${getBatchDiscoveryPageLimit()} 页`, "success");
+});
+[
+  batchCategoryUrlInput,
+  batchCategoryNameInput,
+  batchCategoryTypeInput,
+  batchCategoryTagsInput
+].forEach((input) => {
+  addSafeEventListener(input, "change", saveBatchState);
 });
 addSafeEventListener(amazonVariantPaginationInput, "change", saveCollectorSettingsFromForm);
 addSafeEventListener(batchSearchInput, "input", renderBatchQueue);
@@ -6873,6 +7621,7 @@ addSafeEventListener(imageSourceFilter, "change", () => {
 addSafeEventListener(deleteSelectedImagesButton, "click", deleteSelectedImages);
 bindPickerCompletionListener();
 bindPickerEscapeListener();
+bindMenuDismiss();
 bindCollapsibleSection(batchToggleButton, batchBody);
 bindCollapsibleSection(batchTitleToggle, batchBody);
 bindCollapsibleHeader(batchHeader, batchBody);

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>咩咩采集1.0</title>
+    <title>咩咩羊采集1.0</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -13,7 +13,7 @@
           <img class="brand-mark" src="icons/sheep-logo.svg" alt="" />
           <div>
             <p class="eyebrow">Chrome Extension</p>
-            <h1>咩咩采集 1.0</h1>
+            <h1>咩咩羊采集 1.0</h1>
           </div>
         </div>
 
@@ -377,7 +377,7 @@
                 <h2 id="batchTitleToggle" class="section-title-toggle" role="button" tabindex="0" aria-expanded="true" aria-controls="batchBody">
                   多品采集
                 </h2>
-                <p class="section-subtitle" id="batchSummary">粘贴商品链接，一行一个；采集完成后可合并导出 Shopify CSV。</p>
+                <p class="section-subtitle" id="batchSummary">粘贴商品链接或按分类页发现商品；采集完成后可合并导出 Shopify CSV。</p>
               </div>
               <div class="batch-header-actions">
                 <span id="batchCount">0 个</span>
@@ -385,7 +385,33 @@
               </div>
             </div>
 
-            <div class="collapsible-body" id="batchBody">
+              <div class="collapsible-body" id="batchBody">
+              <section class="batch-utility-panel batch-category-panel">
+                <div class="batch-panel-header">
+                  <h3>分类采集</h3>
+                  <span>按分类页发现商品，并自动写入类型和标签。</span>
+                </div>
+                <div class="batch-edit-grid">
+                  <label class="batch-category-url-field">
+                    <span>分类页 URL</span>
+                    <input id="batchCategoryUrlInput" type="url" placeholder="https://example.com/collections/category" />
+                  </label>
+                  <label>
+                    <span>分类名称</span>
+                    <input id="batchCategoryNameInput" type="text" placeholder="例如 Eyeshadow / 眼影" />
+                  </label>
+                  <label>
+                    <span>商品类型</span>
+                    <input id="batchCategoryTypeInput" type="text" placeholder="默认使用分类名称" />
+                  </label>
+                  <label>
+                    <span>分类标签</span>
+                    <input id="batchCategoryTagsInput" type="text" placeholder="逗号分隔，可追加分类标签" />
+                  </label>
+                </div>
+                <button type="button" class="ghost-button emphasized" id="discoverCategoryUrlsButton">发现当前分类商品</button>
+              </section>
+
               <label class="batch-url-field">
                 <span>商品链接列表</span>
                 <textarea id="batchUrlInput" placeholder="https://example.com/products/a&#10;https://example.com/products/b"></textarea>
@@ -413,7 +439,15 @@
                     <span>采集超时</span>
                     <input id="batchTimeoutInput" type="number" min="8" max="90" step="1" value="35" />
                   </label>
-                  <span>秒，影响链接预检查、API 直采和后台标签页等待。</span>
+                  <label>
+                    <span>并发数</span>
+                    <input id="batchConcurrencyInput" type="number" min="1" max="4" step="1" value="2" />
+                  </label>
+                  <label>
+                    <span>分类页数上限</span>
+                    <input id="batchDiscoveryPageLimitInput" type="number" min="1" max="20" step="1" value="5" />
+                  </label>
+                  <span>超时影响预检查和后台标签页等待；并发建议 2-3，过高可能触发目标站限制。</span>
                 </div>
               </details>
 
@@ -426,6 +460,8 @@
                 <span>搜索商品</span>
                 <input id="batchSearchInput" type="search" placeholder="输入标题、URL、Handle、SKU" />
               </label>
+
+              <div class="batch-list" id="batchList" aria-label="批量采集队列"></div>
 
               <section class="batch-utility-panel batch-edit-panel" id="batchEditPanel">
                 <div class="batch-panel-header">
@@ -466,14 +502,6 @@
                 <button type="button" class="ghost-button emphasized" id="applyBatchEditButton" disabled>应用到所选成功商品</button>
               </section>
 
-              <section class="batch-utility-panel batch-report-panel" id="batchReportPanel" hidden>
-                <div class="batch-panel-header">
-                  <h3>批量汇总</h3>
-                  <span id="batchReportSummary">等待队列</span>
-                </div>
-                <div class="batch-report-grid" id="batchReportStats"></div>
-              </section>
-
               <section class="batch-utility-panel batch-validation-panel" id="batchValidationPanel" hidden>
                 <div class="batch-panel-header">
                   <h3>导出校验</h3>
@@ -489,8 +517,6 @@
                 </div>
                 <ul class="batch-log-list" id="batchLogList"></ul>
               </section>
-
-              <div class="batch-list" id="batchList" aria-label="批量采集队列"></div>
             </div>
           </section>
         </section>
@@ -640,14 +666,6 @@
         </section>
       </section>
 
-      <footer class="bottom-action-bar glass-panel">
-        <div>
-          <span id="bottomModeLabel">商品编辑</span>
-          <small id="bottomValidationState">等待校验</small>
-        </div>
-        <button type="button" class="secondary-button" id="bottomResetButton">重置</button>
-        <button type="button" class="export-action" id="bottomExportCsvButton" disabled>导出 CSV</button>
-      </footer>
     </main>
 
     <script src="csv.js"></script>

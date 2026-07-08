@@ -86,6 +86,9 @@ const seedBatch = {
       source: "",
       handle: "",
       error: "timeout",
+      categoryName: "Eyeshadow",
+      categoryType: "Makeup",
+      categoryTags: "eye, shimmer",
       warningCount: 0,
       rowCount: 0,
       product: null,
@@ -190,8 +193,11 @@ async function run() {
         options: ["Title"]
       };
       const originalFetch = window.fetch.bind(window);
+      const createdTabs = [];
+      let lastCreatedTabId = 0;
 
       window.confirm = () => true;
+      window.__batchCreatedTabs = createdTabs;
       window.fetch = async (input, init) => {
         const url = String(typeof input === "string" ? input : input?.url || "");
 
@@ -215,8 +221,10 @@ async function run() {
             callback?.(result);
             return Promise.resolve(result);
           },
-          create(_options, callback) {
-            const result = { id: 2 };
+          create(options, callback) {
+            createdTabs.push(options?.url || "");
+            const result = { id: 20 + createdTabs.length, url: options?.url || "" };
+            lastCreatedTabId = result.id;
             callback?.(result);
             return Promise.resolve(result);
           },
@@ -224,8 +232,38 @@ async function run() {
             callback?.();
             return Promise.resolve();
           },
+          sendMessage(_tabId, message, callback) {
+            if (message?.type === "SPC_DISCOVER_PRODUCT_URLS") {
+              callback?.({
+                ok: true,
+                data: {
+                  urls: ["https://joyspringvitamins.com/products/detox-drops"],
+                  items: [
+                    {
+                      url: "https://joyspringvitamins.com/products/detox-drops",
+                      title: "Detox Drops",
+                      previewImageUrl: "https://joyspringvitamins.com/cdn/shop/files/detox.jpg"
+                    }
+                  ],
+                  sourceLabel: "Collection 页面",
+                  page: {
+                    title: "Shop By Benefit Detox",
+                    url: "https://joyspringvitamins.com/collections/shop-by-benefit-detox"
+                  }
+                }
+              });
+              return Promise.resolve();
+            }
+
+            callback?.({ ok: true });
+            return Promise.resolve();
+          },
           onUpdated: {
-            addListener() {},
+            addListener(listener) {
+              window.setTimeout(() => {
+                listener?.(lastCreatedTabId, { status: "complete" });
+              }, 0);
+            },
             removeListener() {}
           }
         },
@@ -304,10 +342,32 @@ async function run() {
   }
 
   assert((await page.locator("#batchList .batch-item").count()) === 4, "应恢复 4 个批量项");
-  assert(await page.locator("#batchReportPanel").isVisible(), "批量汇总面板应显示");
   assert(
-    (await page.locator("#batchReportSummary").textContent()).includes("2 个风险"),
-    "汇总应提示 2 个关键风险"
+    (await page.locator('.batch-item[data-batch-id="batch-c"] .batch-item-meta').textContent()).includes("分类：Eyeshadow / Makeup"),
+    "带分类的批量项应显示分类信息"
+  );
+  assert(
+    !(await page.locator("#batchReportPanel").count()),
+    "批量汇总面板已从批量操作主流程移除"
+  );
+  const batchBodyOrder = await page.evaluate(() =>
+    Array.from(document.querySelectorAll("#batchBody > *")).map((element) => ({
+      id: element.id || "",
+      className: element.className || ""
+    }))
+  );
+  const batchListIndex = batchBodyOrder.findIndex((item) => item.id === "batchList");
+  const batchSearchIndex = batchBodyOrder.findIndex((item) =>
+    String(item.className).includes("batch-search-control")
+  );
+  const batchEditIndex = batchBodyOrder.findIndex((item) => item.id === "batchEditPanel");
+  assert(
+    batchSearchIndex >= 0 && batchListIndex === batchSearchIndex + 1,
+    "产品队列应紧跟搜索区域"
+  );
+  assert(
+    batchListIndex >= 0 && batchEditIndex >= 0 && batchListIndex < batchEditIndex,
+    "批量编辑应放在产品队列后面"
   );
   assert(
     (await page.locator('.batch-risk-badge[data-risk="images"]').count()) === 1,
@@ -375,9 +435,52 @@ async function run() {
     (await page.locator("#batchProgressText").textContent()).includes("3/3 成功"),
     "失败项重试后应全部成功"
   );
+  await page.locator('.batch-select-checkbox[data-batch-id="batch-c"]').check();
+  const categoryDownloadPromise = page.waitForEvent("download");
+  await page.locator("#exportSelectedBatchCsvButton").click();
+  const categoryDownload = await categoryDownloadPromise;
+  const categoryCsvText = await fs.readFile(await categoryDownload.path(), "utf8");
+  assert(categoryCsvText.includes("Makeup"), "分类采集应写入商品类型");
+  assert(
+    categoryCsvText.includes("recovered, Eyeshadow, eye, shimmer"),
+    "分类采集应合并商品原标签和分类标签"
+  );
+  await categoryDownload.delete().catch(() => {});
   assert(
     (await page.locator(".batch-log-item").count()) >= 5,
     "采集日志应记录关键操作"
+  );
+
+  await page.locator("#batchCategoryUrlInput").fill(
+    "https://joyspringvitamins.com/collections/shop-by-benefit-detox"
+  );
+  await page.locator("#batchCategoryNameInput").fill("");
+  await page.locator("#batchCategoryTypeInput").fill("");
+  await page.locator("#batchCategoryTagsInput").fill("");
+  await page.locator("#discoverCategoryUrlsButton").click();
+  await page.waitForFunction(() =>
+    document
+      .querySelector("#batchUrlInput")
+      ?.value.includes("https://joyspringvitamins.com/products/detox-drops")
+  );
+  assert(
+    (await page.locator("#batchUrlInput").inputValue()).includes(
+      "https://joyspringvitamins.com/products/detox-drops"
+    ),
+    "分类页 URL 发现应写入 Shopify 商品链接"
+  );
+  assert(
+    (await page.evaluate(() => window.__batchCreatedTabs?.[0] || "")) ===
+      "https://joyspringvitamins.com/collections/shop-by-benefit-detox",
+    "分类页 URL 发现应使用后台标签页扫描指定 URL"
+  );
+  const detoxItem = page.locator(".batch-item").filter({ hasText: "Detox Drops" });
+  assert((await detoxItem.count()) === 1, "分类页 URL 发现应添加 Shopify 商品到队列");
+  assert(
+    (await detoxItem.locator(".batch-item-meta").textContent()).includes(
+      "分类：Shop By Benefit Detox"
+    ),
+    "分类页 URL 发现应从 URL 推断分类名称"
   );
   assert(pageErrors.length === 0, `页面不应有运行时错误：${pageErrors.join("; ")}`);
 
@@ -390,11 +493,15 @@ async function run() {
         checks: [
           "恢复批量队列",
           "无图/无价格高亮",
+          "批量汇总移除",
+          "产品队列紧跟操作区",
           "导出所选",
           "批量编辑品牌、类型、标签、状态和发布设置",
           "重复 handle 修复",
           "多选删除",
           "失败项一键重试",
+          "分类采集写入类型和标签",
+          "分类 URL 后台发现 Shopify 商品",
           "采集日志"
         ]
       },

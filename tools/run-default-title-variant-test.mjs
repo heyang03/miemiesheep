@@ -157,6 +157,16 @@ async function run() {
               const result = [{ id: 1, title: product.title, url: tabUrl }];
               callback?.(result);
               return Promise.resolve(result);
+            },
+            sendMessage(_tabId, _message, callback) {
+              callback?.({ ok: true });
+              return Promise.resolve({ ok: true });
+            }
+          },
+          scripting: {
+            executeScript(_options, callback) {
+              callback?.();
+              return Promise.resolve();
             }
           },
           storage: {
@@ -239,6 +249,46 @@ async function run() {
       exportValidationText.includes("Default Title"),
       "导出前校验应继续展示 Default Title 风险"
     );
+    assert(
+      (await page.locator("#bottomResetButton").count()) === 0 &&
+        (await page.locator("#bottomExportCsvButton").count()) === 0,
+      "底部不应再展示重复的重置/导出按钮"
+    );
+
+    await page.locator('[data-workspace-tab="images"]').click();
+    await page.locator(".compact-menu summary").click();
+    assert(
+      await page.locator(".compact-menu").evaluate((node) => node.open),
+      "图片工具菜单应能展开"
+    );
+    await page.locator("#imageTitleToggle").click();
+    assert(
+      !(await page.locator(".compact-menu").evaluate((node) => node.open)),
+      "点击菜单外部区域应收起图片工具菜单"
+    );
+
+    await page.locator(".more-actions summary").click();
+    await page.locator("#resetAllButton").click();
+    await page.waitForFunction(() => {
+      const summaryImageStatus = document.querySelector("#summaryImageStatus")?.textContent || "";
+      const summaryVariantStatus = document.querySelector("#summaryVariantStatus")?.textContent || "";
+
+      return (
+        !document.querySelector(".image-item") &&
+        !document.querySelector(".variant-item") &&
+        summaryImageStatus.trim() === "0 张" &&
+        summaryVariantStatus.trim() === "0/0"
+      );
+    });
+
+    assert(
+      (await page.locator("#imageCount").textContent()) === "0 张",
+      "重置后图片管理器计数应归零"
+    );
+    assert(
+      (await page.locator("#variantCount").textContent()) === "0/0 导出",
+      "重置后多变体管理计数应归零"
+    );
     assert(pageErrors.length === 0, `页面不应有运行时错误：${pageErrors.join("; ")}`);
 
     await browser.close();
@@ -251,7 +301,10 @@ async function run() {
             "Default Title 变体校验提示",
             "变体卡片 warning 标记",
             "批量默认变体风险徽标",
-            "导出前风险保留"
+            "导出前风险保留",
+            "底部重复动作移除",
+            "图片工具点击外部收起",
+            "重置后图片和变体 DOM 清空"
           ]
         },
         null,

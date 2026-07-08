@@ -230,6 +230,9 @@
   }
 
   function getDiscoveredProductTitle(anchor, root) {
+    const imageAlt = root
+      .querySelector?.("img[alt]:not([aria-hidden='true'])")
+      ?.getAttribute("alt");
     const candidates = [
       anchor.getAttribute("aria-label"),
       anchor.getAttribute("title"),
@@ -239,11 +242,15 @@
       root.querySelector?.(".s-title-instructions-style h2")?.textContent,
       root.querySelector?.(".a-size-base-plus.a-color-base.a-text-normal")?.textContent,
       root.querySelector?.(".product-card__title, .card__heading, .product-title, h2, h3")?.textContent,
+      imageAlt,
       anchor.textContent,
       root.textContent
     ];
 
-    return cleanText(candidates.find((value) => cleanText(value)) || "");
+    return sanitizeDiscoveredProductTitle(
+      candidates.find((value) => cleanText(value)) || "",
+      anchor.getAttribute("href")
+    );
   }
 
   function getProductHandleFromUrl(url) {
@@ -322,35 +329,369 @@
     return "";
   }
 
-  function discoverProductUrls() {
-    const anchors = Array.from(document.querySelectorAll("a[href]"));
-    const seen = new Set();
-    const urls = [];
+  function titleFromProductHandle(handle) {
+    return cleanText(handle)
+      .replace(/\.[a-z0-9]+$/i, "")
+      .replace(/[-_]+/g, " ")
+      .replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+  }
+
+  function htmlToReadableText(value) {
+    const text = String(value || "");
+
+    if (!/[<>]/.test(text)) {
+      return cleanText(text);
+    }
+
+    const element = document.createElement("div");
+    element.innerHTML = text;
+
+    const altText = Array.from(element.querySelectorAll("[alt]"))
+      .map((candidate) => cleanText(candidate.getAttribute("alt")))
+      .find(Boolean);
+
+    return cleanText(altText || element.textContent);
+  }
+
+  function isBadDiscoveredTitle(value) {
+    const text = cleanText(value);
+
+    return (
+      !text ||
+      text.length > 140 ||
+      /<[^>]+>|srcset=|data-nimg|decoding=|style=|loading=/i.test(text)
+    );
+  }
+
+  function sanitizeDiscoveredProductTitle(value, fallbackUrl = "") {
+    const text = htmlToReadableText(value);
+
+    if (!isBadDiscoveredTitle(text)) {
+      return text;
+    }
+
+    const fallbackHandle = getProductHandleFromUrl(fallbackUrl);
+    return fallbackHandle ? titleFromProductHandle(fallbackHandle) : "";
+  }
+
+  function getProductUrlFromHandle(handle) {
+    const cleanHandle = cleanText(handle).replace(/^\/+|\/+$/g, "");
+
+    if (!cleanHandle) {
+      return "";
+    }
+
+    return normalizeDiscoveredProductUrl(`/products/${cleanHandle}`);
+  }
+
+  function isEmbeddedProductNode(value) {
+    const typeValue = cleanText(value?.__typename || value?.["@type"] || value?.type);
+    const titleValue = cleanText(value?.title || value?.name);
+    const isProductType = /\bProduct\b/i.test(typeValue);
+
+    return (
+      value &&
+      typeof value === "object" &&
+      titleValue &&
+      (isProductType ||
+        typeof value.handle === "string" ||
+        normalizeDiscoveredProductUrl(value.url || value.onlineStoreUrl || value.href) ||
+        value.featuredImage ||
+        value.image ||
+        value.images ||
+        value.variants ||
+        value.vendor)
+    );
+  }
+
+  function getImageUrlFromEmbeddedValue(value) {
+    if (!value) {
+      return "";
+    }
+
+    if (typeof value === "string") {
+      return value;
+    }
+
+    if (Array.isArray(value)) {
+      return value.map(getImageUrlFromEmbeddedValue).find(Boolean) || "";
+    }
+
+    if (typeof value === "object") {
+      return value.url || value.src || value.originalSrc || value.transformedSrc || "";
+    }
+
+    return "";
+  }
+
+  function getEmbeddedProductUrl(product) {
+    const directUrl = normalizeDiscoveredProductUrl(
+      product?.url || product?.onlineStoreUrl || product?.href
+    );
+
+    if (directUrl) {
+      return directUrl;
+    }
+
+    return getProductUrlFromHandle(product?.handle);
+  }
+
+  function getEmbeddedProductTitle(product) {
+    return product?.title || product?.name || "";
+  }
+
+  function getEmbeddedProductImageUrl(product) {
+    const candidates = [
+      product?.featuredImage?.url,
+      product?.image?.url,
+      product?.image?.src,
+      getImageUrlFromEmbeddedValue(product?.image),
+      getImageUrlFromEmbeddedValue(product?.images),
+      product?.images?.nodes?.[0]?.url,
+      product?.images?.edges?.[0]?.node?.url,
+      product?.images?.[0]?.url,
+      product?.images?.[0]?.src
+    ];
+    const image = uniqueImages(candidates)[0];
+
+    return image?.url || "";
+  }
+
+  function walkEmbeddedProductNodes(value, products, seen) {
+    if (!value || typeof value !== "object" || seen.has(value) || products.length > 500) {
+      return;
+    }
+
+    seen.add(value);
+
+    if (isEmbeddedProductNode(value)) {
+      products.push(value);
+    }
+
+    if (Array.isArray(value)) {
+      value.forEach((item) => walkEmbeddedProductNodes(item, products, seen));
+      return;
+    }
+
+    Object.values(value).forEach((item) => walkEmbeddedProductNodes(item, products, seen));
+  }
+
+  function getEmbeddedJsonPayloads() {
+    return Array.from(
+      document.querySelectorAll(
+        [
+          "script#__NEXT_DATA__",
+          "script[type='application/json']",
+          "script[type='application/ld+json']"
+        ].join(",")
+      )
+    )
+      .map((script) => String(script.textContent || "").trim())
+      .filter((text, index, values) => text && values.indexOf(text) === index)
+      .filter((text) => /^[\[{]/.test(text));
+  }
+
+  function discoverEmbeddedProductItems() {
+    const seenProducts = new Set();
     const items = [];
 
-    anchors.forEach((anchor) => {
-      const url = normalizeDiscoveredProductUrl(anchor.getAttribute("href"));
+    getEmbeddedJsonPayloads().forEach((text) => {
+      try {
+        const data = JSON.parse(text);
+        const products = [];
 
-      if (!url || seen.has(url)) {
+        walkEmbeddedProductNodes(data, products, new WeakSet());
+
+        products.forEach((product) => {
+          const url = getEmbeddedProductUrl(product);
+
+          if (!url || seenProducts.has(url)) {
+            return;
+          }
+
+          seenProducts.add(url);
+          items.push({
+            url,
+            title: sanitizeDiscoveredProductTitle(getEmbeddedProductTitle(product), url),
+            previewImageUrl: getEmbeddedProductImageUrl(product)
+          });
+        });
+      } catch (error) {
+        // Ignore non-JSON script payloads that share a JSON-like type.
+      }
+    });
+
+    return items;
+  }
+
+  function mergeDiscoveredProductItem(itemsByUrl, item) {
+    const url = normalizeDiscoveredProductUrl(item?.url);
+
+    if (!url) {
+      return;
+    }
+
+    const existing = itemsByUrl.get(url) || { url };
+    const title = sanitizeDiscoveredProductTitle(item.title, url);
+    const previewImageUrl = String(item.previewImageUrl || "").trim();
+
+    itemsByUrl.set(url, {
+      url,
+      title:
+        existing.title && !isBadDiscoveredTitle(existing.title)
+          ? existing.title
+          : title || existing.title || titleFromProductHandle(getProductHandleFromUrl(url)),
+      previewImageUrl: existing.previewImageUrl || previewImageUrl
+    });
+  }
+
+  function normalizeDiscoveryPageUrl(url) {
+    const absoluteUrl = toAbsoluteUrl(url);
+
+    if (!absoluteUrl) {
+      return "";
+    }
+
+    try {
+      const parsedUrl = new URL(absoluteUrl);
+
+      if (parsedUrl.origin !== window.location.origin) {
+        return "";
+      }
+
+      if (normalizeDiscoveredProductUrl(parsedUrl.href)) {
+        return "";
+      }
+
+      parsedUrl.hash = "";
+      return parsedUrl.href;
+    } catch (error) {
+      return "";
+    }
+  }
+
+  function getPageNumberFromUrl(url) {
+    try {
+      const parsedUrl = new URL(url, window.location.href);
+      const pageValue = Number(parsedUrl.searchParams.get("page") || 1);
+
+      return Number.isFinite(pageValue) && pageValue > 0 ? Math.round(pageValue) : 1;
+    } catch (error) {
+      return 1;
+    }
+  }
+
+  function getSequentialDiscoveryPageUrl() {
+    if (!/\/(?:collections?|category|categories|search|shop|catalog)\b/i.test(window.location.pathname)) {
+      return "";
+    }
+
+    try {
+      const parsedUrl = new URL(window.location.href);
+      const currentPage = getPageNumberFromUrl(parsedUrl.href);
+
+      parsedUrl.hash = "";
+      parsedUrl.searchParams.set("page", String(currentPage + 1));
+      return normalizeDiscoveryPageUrl(parsedUrl.href);
+    } catch (error) {
+      return "";
+    }
+  }
+
+  function isLikelyNextPaginationAnchor(anchor) {
+    const label = [
+      anchor.textContent,
+      anchor.getAttribute("aria-label"),
+      anchor.getAttribute("title"),
+      anchor.rel,
+      anchor.className,
+      anchor.id
+    ].map(cleanText).join(" ");
+
+    return /(^|\s)(next|older|more|下一页|下一頁|下页|下頁|后一页|後一頁|加载更多|載入更多|›|»)(\s|$)/i.test(label);
+  }
+
+  function discoverPaginationUrls() {
+    const currentUrl = normalizeDiscoveryPageUrl(window.location.href);
+    const candidates = [];
+
+    document
+      .querySelectorAll("link[rel~='next'][href], a[rel~='next'][href]")
+      .forEach((element) => candidates.push(element.getAttribute("href")));
+
+    document
+      .querySelectorAll(
+        [
+          "nav a[href]",
+          "[class*='pagination'] a[href]",
+          "[class*='Pagination'] a[href]",
+          "[aria-label*='pagination' i] a[href]",
+          "a[href*='page=']"
+        ].join(",")
+      )
+      .forEach((anchor) => candidates.push(anchor.getAttribute("href")));
+
+    Array.from(document.querySelectorAll("a[href]"))
+      .filter(isLikelyNextPaginationAnchor)
+      .forEach((anchor) => candidates.push(anchor.getAttribute("href")));
+
+    candidates.push(getSequentialDiscoveryPageUrl());
+
+    const seen = new Set();
+
+    return candidates
+      .map(normalizeDiscoveryPageUrl)
+      .filter((url) => url && url !== currentUrl)
+      .filter((url) => {
+        if (seen.has(url)) {
+          return false;
+        }
+
+        seen.add(url);
+        return true;
+      });
+  }
+
+  function discoverProductUrls() {
+    const anchors = Array.from(document.querySelectorAll("a[href]"));
+    const itemsByUrl = new Map();
+    const embeddedItems = discoverEmbeddedProductItems();
+    const preferCollectionData =
+      embeddedItems.length && /\/collections?\//i.test(window.location.pathname);
+
+    embeddedItems.forEach((item) => mergeDiscoveredProductItem(itemsByUrl, item));
+
+    anchors.forEach((anchor) => {
+      if (preferCollectionData && !anchor.closest("main")) {
         return;
       }
 
-      seen.add(url);
-      urls.push(url);
+      const url = normalizeDiscoveredProductUrl(anchor.getAttribute("href"));
+
+      if (!url) {
+        return;
+      }
+
       const root = getProductCardRoot(anchor);
       const title = getDiscoveredProductTitle(anchor, root);
-      items.push({
+      mergeDiscoveredProductItem(itemsByUrl, {
         url,
         title,
         previewImageUrl: getDiscoveredProductImage(anchor, root, url, title)
       });
     });
 
+    const items = Array.from(itemsByUrl.values());
+    const urls = items.map((item) => item.url);
+    const paginationUrls = discoverPaginationUrls();
+
     return {
       urls,
       items,
       sourceLabel: getDiscoveredUrlSourceLabel(urls),
       anchorCount: anchors.length,
+      paginationUrls,
+      nextPageUrl: paginationUrls[0] || "",
       page: getPageInfo()
     };
   }
@@ -6155,6 +6496,42 @@
     return mergeProductData(jsonLd, meta, dom, shopify, siteRule);
   }
 
+  function collectProductPreview() {
+    const title =
+      queryText(["#productTitle", "h1", "[property='og:title']", "title"]) ||
+      sanitizeDocumentTitle(document.title);
+    const imageUrls = [];
+
+    [
+      "meta[property='og:image']",
+      "meta[name='twitter:image']",
+      "#landingImage",
+      "#imgTagWrapperId img",
+      "#imageBlock img[data-a-dynamic-image]",
+      "[data-product-featured-image]",
+      ".product__media img",
+      ".product-gallery img",
+      ".product-single__media img",
+      "main img"
+    ].forEach((selector) => {
+      document
+        .querySelectorAll(selector)
+        .forEach((element) => {
+          imageUrls.push(...collectImageUrlsFromElement(element));
+        });
+    });
+
+    const previewImageUrl = uniqueImages(imageUrls)
+      .map((image) => image.url)
+      .find((url) => isLikelyProductImage(url)) || "";
+
+    return {
+      title,
+      previewImageUrl,
+      page: getPageInfo()
+    };
+  }
+
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message) {
       return false;
@@ -6197,6 +6574,22 @@
         sendResponse({
           ok: false,
           error: error.message || "发现商品链接失败"
+        });
+      }
+
+      return true;
+    }
+
+    if (message.type === "SPC_COLLECT_PRODUCT_PREVIEW") {
+      try {
+        sendResponse({
+          ok: true,
+          data: collectProductPreview()
+        });
+      } catch (error) {
+        sendResponse({
+          ok: false,
+          error: error.message || "商品预览采集失败"
         });
       }
 
