@@ -123,6 +123,7 @@ const checkImagesButton = document.getElementById("checkImagesButton");
 const filterSmallImagesButton = document.getElementById("filterSmallImagesButton");
 const filterDuplicateImagesButton = document.getElementById("filterDuplicateImagesButton");
 const fillImageAltButton = document.getElementById("fillImageAltButton");
+const downloadSelectedImagesButton = document.getElementById("downloadSelectedImagesButton");
 const deleteSelectedImagesButton = document.getElementById("deleteSelectedImagesButton");
 const imageSourceFilter = document.getElementById("imageSourceFilter");
 const imageReplaceFromInput = document.getElementById("imageReplaceFromInput");
@@ -190,6 +191,7 @@ let isBatchPrechecking = false;
 let isCheckingImages = false;
 let shouldStopBatchCollection = false;
 let draggedImageIndex = null;
+let activePagePicker = null;
 
 function setStatus(message, type = "idle") {
   if (statusText) {
@@ -3232,7 +3234,7 @@ async function startSiteRulePicker(field) {
     }
 
     await chromeStorageSet({ [SITE_RULE_EXPAND_AFTER_PICK_KEY]: true });
-    setStatus(`请在页面中点击要作为「${label}」的元素`, "loading");
+    setStatus(`请在页面中点击要作为「${label}」的元素，侧边栏会保持打开`, "loading");
     const response = await sendMessageWithInjection(tab.id, {
       type: "SPC_START_SITE_RULE_PICKER",
       field
@@ -3242,7 +3244,12 @@ async function startSiteRulePicker(field) {
       throw new Error(response?.error || "无法启动站点规则选择");
     }
 
-    window.setTimeout(() => window.close(), 120);
+    activePagePicker = {
+      type: "site-rule",
+      field,
+      tabId: tab.id
+    };
+    setStatus(`站点规则选择已启动，请直接在页面点击「${label}」元素`, "loading");
   } catch (error) {
     await chromeStorageRemove(SITE_RULE_EXPAND_AFTER_PICK_KEY);
     setStatus(error.message || "站点规则选择启动失败", "error");
@@ -4220,6 +4227,156 @@ function replaceImageDomain() {
   );
 }
 
+function sanitizeDownloadFilePart(value, fallback = "product-image") {
+  return (
+    String(value || "")
+      .trim()
+      .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "-")
+      .replace(/\s+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || fallback
+  );
+}
+
+function getImageDownloadExtension(url) {
+  try {
+    const parsedUrl = new URL(url, currentTabUrl || window.location.href);
+    const match = parsedUrl.pathname.match(/\.([a-z0-9]{2,5})$/i);
+    const extension = (match?.[1] || "").toLowerCase();
+    const supportedExtensions = new Set([
+      "jpg",
+      "jpeg",
+      "png",
+      "webp",
+      "gif",
+      "avif",
+      "svg",
+      "bmp",
+      "tif",
+      "tiff"
+    ]);
+
+    return supportedExtensions.has(extension) ? extension : "jpg";
+  } catch (error) {
+    return "jpg";
+  }
+}
+
+function getImageDownloadFilename(image, index) {
+  const baseName = sanitizeDownloadFilePart(
+    currentProductDraft?.handle || generateHandle(currentProductDraft?.title) || "product-image"
+  );
+  const position = String(Number(image?.position || index + 1)).padStart(2, "0");
+  const extension = getImageDownloadExtension(image?.url || "");
+
+  return `${baseName}-${position}.${extension}`;
+}
+
+function downloadUrlWithAnchor(url, filename) {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.target = "_blank";
+  anchor.rel = "noreferrer";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+function downloadUrlWithChromeDownloads(url, filename) {
+  const downloadsApi = globalThis.chrome?.downloads;
+
+  if (!downloadsApi?.download) {
+    downloadUrlWithAnchor(url, filename);
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve, reject) => {
+    downloadsApi.download(
+      {
+        url,
+        filename,
+        conflictAction: "uniquify",
+        saveAs: false
+      },
+      (downloadId) => {
+        const lastError = globalThis.chrome?.runtime?.lastError;
+
+        if (lastError) {
+          reject(new Error(lastError.message));
+          return;
+        }
+
+        resolve(downloadId);
+      }
+    );
+  });
+}
+
+async function downloadSelectedImages() {
+  if (!currentProductDraft) {
+    setStatus("请先采集商品，再下载图片", "error");
+    return;
+  }
+
+  const selectedIndexes = getCheckedIndexes(".image-select-checkbox");
+
+  if (!selectedIndexes.length) {
+    setStatus("请先勾选要下载的图片", "error");
+    return;
+  }
+
+  updateDraftFromForm();
+
+  const images = normalizeImages(currentProductDraft.images, currentProductDraft.title);
+  const selectedImages = selectedIndexes
+    .map((index) => ({
+      index,
+      image: images[index]
+    }))
+    .filter(({ image }) => image?.url);
+
+  if (!selectedImages.length) {
+    setStatus("所选图片没有可下载的 URL", "error");
+    return;
+  }
+
+  downloadSelectedImagesButton.disabled = true;
+  setStatus(`正在下载 ${selectedImages.length} 张图片...`, "loading");
+
+  let successCount = 0;
+  const failedDownloads = [];
+
+  for (const { image, index } of selectedImages) {
+    try {
+      await downloadUrlWithChromeDownloads(image.url, getImageDownloadFilename(image, index));
+      successCount += 1;
+    } catch (error) {
+      failedDownloads.push({
+        image,
+        error
+      });
+    }
+  }
+
+  updateImageSelectionToolbar();
+
+  if (!successCount) {
+    setStatus(
+      failedDownloads[0]?.error?.message || "所选图片下载失败，请检查图片链接",
+      "error"
+    );
+    return;
+  }
+
+  setStatus(
+    failedDownloads.length
+      ? `已开始下载 ${successCount} 张图片，${failedDownloads.length} 张失败`
+      : `已开始下载 ${successCount} 张图片`,
+    failedDownloads.length ? "idle" : "success"
+  );
+}
+
 function getCheckedIndexes(selector) {
   return Array.from(document.querySelectorAll(selector))
     .filter((input) => input.checked)
@@ -4279,6 +4436,7 @@ function updateImageSelectionToolbar() {
   const allSelected = checkboxes.length > 0 && selectedCount === checkboxes.length;
 
   imageSelectAllButton.textContent = allSelected ? "取消全选" : "全选";
+  downloadSelectedImagesButton.disabled = !selectedCount;
   deleteSelectedImagesButton.disabled = !selectedCount;
 }
 
@@ -5996,7 +6154,8 @@ function renderVariants(variants) {
     compactMeta.append(
       createVariantMetaPill("SKU", variant.sku),
       createVariantMetaPill("价格", variant.price),
-      createVariantMetaPill("Barcode", variant.barcode)
+      createVariantMetaPill("Barcode", variant.barcode),
+      createVariantMetaPill("原价/对比价", variant.compareAtPrice)
     );
 
     details.className = "variant-details";
@@ -6263,7 +6422,7 @@ async function exportCurrentProductCsv() {
 
 async function startImageAreaPicker() {
   selectImageAreaButton.disabled = true;
-  setStatus("请在页面上点击商品图片区域，选择后重新打开插件采集", "loading");
+  setStatus("请在页面上点击商品图片区域，侧边栏会保持打开", "loading");
 
   try {
     await savePopupUiReturnState("images", "image-picker");
@@ -6281,14 +6440,127 @@ async function startImageAreaPicker() {
       throw new Error(response?.error || "无法启动图片区域选择");
     }
 
-    setStatus("图片区域选择已启动，正在隐藏插件窗口", "loading");
-    window.setTimeout(() => {
-      window.close();
-    }, 120);
+    activePagePicker = {
+      type: "image",
+      tabId: tab.id
+    };
+    selectImageAreaButton.disabled = false;
+    setStatus("图片区域选择已启动，请直接在页面点击目标区域", "loading");
   } catch (error) {
     setStatus(error.message || "图片区域选择启动失败", "error");
     selectImageAreaButton.disabled = false;
   }
+}
+
+async function syncPickerCompletionMessage(message, senderTabId) {
+  const messageDomain = getDomain(message?.pageUrl || "");
+  const currentDomain = getDomain(currentTabUrl || pageUrlInput.value || "");
+
+  if (messageDomain && currentDomain && messageDomain !== currentDomain) {
+    return;
+  }
+
+  try {
+    if (message?.cancelled) {
+      activePagePicker = null;
+      selectImageAreaButton.disabled = false;
+      setStatus(message.message || "已取消页面选择", message.failed ? "error" : "idle");
+      return;
+    }
+
+    if (message?.picker === "image") {
+      const tab = senderTabId ? { id: senderTabId } : await getCurrentTab();
+
+      if (tab?.id) {
+        await refreshImagePickerStatus(tab.id);
+      }
+
+      selectImageAreaButton.disabled = false;
+      activePagePicker = null;
+      activateWorkspaceTab("images");
+      setStatus(message.message || "图片区域已保存，侧边栏已同步", "success");
+      return;
+    }
+
+    if (message?.picker === "site-rule") {
+      const label = SITE_RULE_FIELD_LABELS[message.field] || "字段";
+
+      await refreshSiteRulePanel();
+      await chromeStorageRemove(SITE_RULE_EXPAND_AFTER_PICK_KEY);
+      setCollapsibleState(siteRuleToggleButton, siteRuleBody, true);
+      activePagePicker = null;
+      activateWorkspaceTab("tools");
+      setStatus(message.message || `已保存${label}规则，侧边栏已同步`, "success");
+    }
+  } catch (error) {
+    setStatus(error.message || "选择结果同步失败，请手动刷新侧边栏", "error");
+  }
+}
+
+async function cancelActivePagePickerFromPanel() {
+  if (!activePagePicker) {
+    return;
+  }
+
+  const picker = activePagePicker;
+  activePagePicker = null;
+  selectImageAreaButton.disabled = false;
+
+  try {
+    const tabId = picker.tabId || (await getCurrentTab())?.id;
+
+    if (!tabId) {
+      throw new Error("没有找到当前活动标签页");
+    }
+
+    const response = await sendMessageWithInjection(tabId, {
+      type: "SPC_CANCEL_ACTIVE_PICKER"
+    });
+
+    if (!response?.ok) {
+      throw new Error(response?.error || "页面选择取消失败");
+    }
+
+    setStatus(response.message || "已取消页面选择", "idle");
+  } catch (error) {
+    setStatus(error.message || "页面选择取消失败", "error");
+  }
+}
+
+function bindPickerEscapeListener() {
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (event.key !== "Escape" || !activePagePicker) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      cancelActivePagePickerFromPanel();
+    },
+    true
+  );
+}
+
+function bindPickerCompletionListener() {
+  const runtime = globalThis.chrome?.runtime;
+
+  if (!runtime?.onMessage?.addListener) {
+    return;
+  }
+
+  runtime.onMessage.addListener((message, sender) => {
+    if (message?.type !== "SPC_PICKER_COMPLETED") {
+      return false;
+    }
+
+    window.setTimeout(() => {
+      syncPickerCompletionMessage(message, sender?.tab?.id);
+    }, 0);
+
+    return false;
+  });
 }
 
 async function refreshImagePickerStatus(tabId) {
@@ -6594,10 +6866,13 @@ addSafeEventListener(filterSmallImagesButton, "click", filterSmallImages);
 addSafeEventListener(filterDuplicateImagesButton, "click", filterDuplicateImages);
 addSafeEventListener(fillImageAltButton, "click", fillImageAltText);
 addSafeEventListener(replaceImageDomainButton, "click", replaceImageDomain);
+addSafeEventListener(downloadSelectedImagesButton, "click", downloadSelectedImages);
 addSafeEventListener(imageSourceFilter, "change", () => {
   renderImages(currentProductDraft?.images || []);
 });
 addSafeEventListener(deleteSelectedImagesButton, "click", deleteSelectedImages);
+bindPickerCompletionListener();
+bindPickerEscapeListener();
 bindCollapsibleSection(batchToggleButton, batchBody);
 bindCollapsibleSection(batchTitleToggle, batchBody);
 bindCollapsibleHeader(batchHeader, batchBody);

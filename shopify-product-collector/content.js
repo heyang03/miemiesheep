@@ -1207,14 +1207,59 @@
     window.setTimeout(() => toast.remove(), 2600);
   }
 
-  function requestPopupReopen() {
+  function requestPopupReopen(payload = {}) {
     try {
-      chrome.runtime.sendMessage({ type: "SPC_OPEN_POPUP_AFTER_PICK" }, () => {
+      chrome.runtime.sendMessage({ type: "SPC_OPEN_POPUP_AFTER_PICK", ...payload }, () => {
         void chrome.runtime.lastError;
       });
     } catch (error) {
       // Some Chromium builds do not allow programmatic popup opening.
     }
+  }
+
+  function notifyPickerCompleted(payload = {}) {
+    try {
+      chrome.runtime.sendMessage(
+        {
+          type: "SPC_PICKER_COMPLETED",
+          pageUrl: window.location.href,
+          hostname: window.location.hostname,
+          ...payload
+        },
+        () => {
+          void chrome.runtime.lastError;
+        }
+      );
+    } catch (error) {
+      // The picker result is already stored; the side panel can refresh manually if messaging fails.
+    }
+  }
+
+  function cancelActivePicker() {
+    if (activeImagePickerCleanup) {
+      const message = "已取消图片区域选择";
+      activeImagePickerCleanup(message);
+      return {
+        ok: true,
+        picker: "image",
+        message
+      };
+    }
+
+    if (activeSiteRulePickerCleanup) {
+      const message = "已取消站点规则选择";
+      activeSiteRulePickerCleanup(message);
+      return {
+        ok: true,
+        picker: "site-rule",
+        message
+      };
+    }
+
+    return {
+      ok: false,
+      error: "当前没有正在进行的页面选择"
+    };
   }
 
   function startImageAreaPicker() {
@@ -1229,6 +1274,7 @@
     let lastHoveredElement = null;
     let previousOutline = "";
     let previousBackground = "";
+    let isConfirming = false;
     const banner = document.createElement("div");
     const selectorLabel = document.createElement("div");
 
@@ -1326,10 +1372,11 @@
     }
 
     function confirmSelection() {
-      if (!highlightedElement) {
+      if (!highlightedElement || isConfirming) {
         return;
       }
 
+      isConfirming = true;
       const selector = getImageAreaSelectorFromTarget(highlightedElement);
       const imageInfo = inspectImagesInElement(highlightedElement, selector);
       const imageStatus = imageInfo.urlCount
@@ -1338,10 +1385,28 @@
           ? "有图片节点但没有可用URL"
           : "未发现图片节点";
 
-      saveStoredImageSelector(selector).then(() => {
-        cleanup(`已保存图片区域（${imageStatus}），正在重新打开插件`);
-        requestPopupReopen();
-      });
+      cleanup();
+      saveStoredImageSelector(selector)
+        .then(() => {
+          const message = `已保存图片区域（${imageStatus}），侧边栏已同步`;
+          showPickerToast(message);
+          notifyPickerCompleted({
+            picker: "image",
+            selector,
+            message
+          });
+          requestPopupReopen({ picker: "image" });
+        })
+        .catch((error) => {
+          const message = error.message || "图片区域保存失败";
+          showPickerToast(message);
+          notifyPickerCompleted({
+            picker: "image",
+            cancelled: true,
+            failed: true,
+            message
+          });
+        });
     }
 
     function cleanup(message) {
@@ -1374,7 +1439,13 @@
     function onKeyDown(event) {
       if (event.key === "Escape") {
         event.preventDefault();
-        cleanup("已取消图片区域选择");
+        const message = "已取消图片区域选择";
+        cleanup(message);
+        notifyPickerCompleted({
+          picker: "image",
+          cancelled: true,
+          message
+        });
         return;
       }
 
@@ -1634,14 +1705,29 @@
       const selector = getSelectorFromTarget(highlightedElement);
       const sample = getSiteRuleFieldSample(field, selector, highlightedElement);
 
+      cleanup();
       saveStoredSiteRuleSelector(field, selector)
         .then(() => {
-          cleanup(`已保存${fieldLabel}规则（${sample}），正在重新打开插件`);
-          requestPopupReopen();
+          const message = `已保存${fieldLabel}规则（${sample}），侧边栏已同步`;
+          showPickerToast(message);
+          notifyPickerCompleted({
+            picker: "site-rule",
+            field,
+            selector,
+            message
+          });
+          requestPopupReopen({ picker: "site-rule", field });
         })
         .catch((error) => {
-          isConfirming = false;
-          showPickerToast(error.message || "站点规则保存失败");
+          const message = error.message || "站点规则保存失败";
+          showPickerToast(message);
+          notifyPickerCompleted({
+            picker: "site-rule",
+            field,
+            cancelled: true,
+            failed: true,
+            message
+          });
         });
     }
 
@@ -1659,7 +1745,14 @@
     function onKeyDown(event) {
       if (event.key === "Escape") {
         event.preventDefault();
-        cleanup("已取消站点规则选择");
+        const message = "已取消站点规则选择";
+        cleanup(message);
+        notifyPickerCompleted({
+          picker: "site-rule",
+          field,
+          cancelled: true,
+          message
+        });
         return;
       }
 
@@ -6209,6 +6302,12 @@
       sendResponse({
         ok: true
       });
+
+      return true;
+    }
+
+    if (message.type === "SPC_CANCEL_ACTIVE_PICKER") {
+      sendResponse(cancelActivePicker());
 
       return true;
     }

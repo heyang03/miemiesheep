@@ -2499,7 +2499,7 @@ select:focus {
 
 .variant-compact-meta {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
   margin: 9px 0;
 }
@@ -3208,7 +3208,7 @@ select {
 }
 
 .variant-compact-meta {
-  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .variant-list {
