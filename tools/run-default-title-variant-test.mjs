@@ -13,7 +13,8 @@ const requirePlaywright = createRequire(
 );
 const { chromium } = requirePlaywright("playwright");
 
-const currentTabUrl = "https://checks.example/products/current";
+const batchStorageKey = "spc:batch-queue:v1";
+const currentTabUrl = "https://default-title.example/products/single-default";
 
 function hashString(value) {
   let hash = 0;
@@ -59,55 +60,66 @@ async function launchBrowser() {
   throw lastError;
 }
 
-const draft = {
-  title: "Image Check Product",
-  handle: "image-check-product",
-  description: "Image check description",
-  vendor: "Check Vendor",
+const product = {
+  title: "Default Title Product",
+  handle: "default-title-product",
+  description: "A product whose source only exposed Shopify's default variant.",
+  vendor: "Default Vendor",
   type: "",
   tags: "",
   status: "draft",
   published: "false",
-  sku: "IMG-CHECK",
-  price: "29.99",
+  sku: "DEFAULT-1",
+  price: "19.99",
   compareAtPrice: "",
   images: [
     {
-      url: "https://cdn.example/valid-large.jpg",
+      url: "https://cdn.example/default-title-product.jpg",
       position: 1,
-      altText: "Large image"
-    },
-    {
-      url: "https://cdn.example/valid-small.jpg",
-      position: 2,
-      altText: "Small image"
-    },
-    {
-      url: "https://cdn.example/broken.jpg",
-      position: 3,
-      altText: "Broken image"
+      altText: "Default Title Product"
     }
   ],
   variants: [
     {
-      sku: "IMG-CHECK",
+      sku: "DEFAULT-1",
       barcode: "",
-      option1Name: "Default Title",
+      option1Name: "Title",
       option1Value: "Default Title",
       option2Name: "",
       option2Value: "",
       option3Name: "",
       option3Value: "",
-      price: "29.99",
+      price: "19.99",
       compareAtPrice: "",
-      variantImageUrl: "https://cdn.example/valid-large.jpg"
+      variantImageUrl: "https://cdn.example/default-title-product.jpg"
     }
   ],
-  source: "fallback",
+  source: "shopify-api",
   page: {
-    title: "Image Check Product",
+    title: "Default Title Product",
     url: currentTabUrl
   }
+};
+
+const batchState = {
+  items: [
+    {
+      id: "batch-default-title",
+      url: currentTabUrl,
+      status: "success",
+      title: product.title,
+      source: "Shopify API",
+      handle: product.handle,
+      error: "",
+      warningCount: 0,
+      rowCount: 1,
+      updatedAt: new Date().toISOString(),
+      product
+    }
+  ],
+  selectedIds: [],
+  logs: [],
+  savedAt: new Date().toISOString()
 };
 
 async function run() {
@@ -127,59 +139,22 @@ async function run() {
     });
 
     await page.addInitScript(
-      ({ currentTabUrl: tabUrl, draftStorageKey, draft }) => {
+      ({ currentTabUrl: tabUrl, draftStorageKey, batchStorageKey, product, batchState }) => {
         const storage = {
           [draftStorageKey]: {
-            draft: structuredClone(draft),
+            draft: structuredClone(product),
             normalizedPageUrl: tabUrl,
             savedAt: new Date().toISOString()
-          }
+          },
+          [batchStorageKey]: structuredClone(batchState)
         };
 
         window.confirm = () => true;
-
-        class MockImage {
-          constructor() {
-            this.onload = null;
-            this.onerror = null;
-            this.width = 0;
-            this.height = 0;
-            this.naturalWidth = 0;
-            this.naturalHeight = 0;
-          }
-
-          set src(value) {
-            this._src = value;
-            setTimeout(() => {
-              if (String(value).includes("broken")) {
-                this.onerror?.(new Error("broken image"));
-                return;
-              }
-
-              const isSmall = String(value).includes("valid-small");
-              this.naturalWidth = isSmall ? 120 : 900;
-              this.naturalHeight = isSmall ? 120 : 700;
-              this.width = this.naturalWidth;
-              this.height = this.naturalHeight;
-              this.onload?.();
-            }, 5);
-          }
-
-          get src() {
-            return this._src || "";
-          }
-        }
-
-        Object.defineProperty(window, "Image", {
-          configurable: true,
-          value: MockImage
-        });
-
-        const chromeMock = {
+        window.chrome = {
           runtime: { lastError: null },
           tabs: {
             query(_query, callback) {
-              const result = [{ id: 1, title: "Image Check Product", url: tabUrl }];
+              const result = [{ id: 1, title: product.title, url: tabUrl }];
               callback?.(result);
               return Promise.resolve(result);
             }
@@ -190,6 +165,15 @@ async function run() {
                 if (typeof key === "string") {
                   callback?.({ [key]: storage[key] });
                   return Promise.resolve({ [key]: storage[key] });
+                }
+
+                if (Array.isArray(key)) {
+                  const result = key.reduce((values, item) => {
+                    values[item] = storage[item];
+                    return values;
+                  }, {});
+                  callback?.(result);
+                  return Promise.resolve(result);
                 }
 
                 callback?.({ ...storage });
@@ -210,54 +194,51 @@ async function run() {
             }
           }
         };
-
-        try {
-          Object.defineProperty(window, "chrome", {
-            configurable: true,
-            value: chromeMock
-          });
-        } catch (error) {
-          Object.assign(window.chrome, chromeMock);
-        }
       },
       {
         currentTabUrl,
         draftStorageKey: getDraftStorageKey(currentTabUrl),
-        draft
+        batchStorageKey,
+        product,
+        batchState
       }
     );
 
     await page.goto(popupUrl);
-    await page.locator('[data-workspace-tab="images"]').click();
-    await page.waitForSelector(".image-item", { timeout: 8000 });
-    await page.locator("#checkImagesButton").click();
+    await page.locator('[data-workspace-tab="variants"]').click();
+    await page.waitForSelector(".variant-item", { timeout: 8000 });
+    await page.locator('[data-workspace-tab="batch"]').click();
+    await page.waitForSelector('.batch-risk-badge[data-risk="variants"]', {
+      timeout: 8000
+    });
+
+    await page.locator('[data-workspace-tab="variants"]').click();
+    await page.locator("#checkVariantsButton").click();
     await page.waitForFunction(() =>
-      Array.from(document.querySelectorAll(".image-check-status")).some(
-        (item) => item.dataset.checkStatus === "invalid"
-      )
+      document.querySelector(".variant-item")?.classList.contains("has-validation-warning")
     );
 
-    const statuses = await page.locator(".image-check-status").evaluateAll((items) =>
-      items.map((item) => ({
-        status: item.dataset.checkStatus,
-        text: item.textContent
-      }))
-    );
+    const validationText = await page.locator("#validationList").textContent();
+    const statusText = await page.locator("#statusText").textContent();
+    const batchVariantRiskText = await page
+      .locator('.batch-risk-badge[data-risk="variants"]')
+      .textContent();
 
-    assert(statuses[0].status === "valid", "第一张图片应为有效大图");
-    assert(statuses[0].text.includes("900x700"), "第一张图片应显示尺寸");
-    assert(statuses[1].status === "small", "第二张图片应提示小图");
-    assert(statuses[2].status === "invalid", "第三张图片应提示加载失败");
+    assert(validationText.includes("Default Title"), "变体校验应展示 Default Title 提示");
+    assert(validationText.includes("单规格商品"), "单变体默认标题应说明会按单规格导出");
+    assert(statusText.includes("变体风险"), "状态栏应提示发现变体风险");
+    assert(batchVariantRiskText === "默认变体", "批量队列应显示默认变体风险徽标");
 
     const downloadPromise = page.waitForEvent("download");
     await page.locator("#exportCsvButton").click();
     const download = await downloadPromise;
     await download.delete().catch(() => {});
 
-    const validationText = await page.locator("#validationList").textContent();
-
-    assert(validationText.includes("尺寸偏小"), "导出校验应提示小图风险");
-    assert(validationText.includes("检查失败"), "导出校验应提示失败图片风险");
+    const exportValidationText = await page.locator("#validationList").textContent();
+    assert(
+      exportValidationText.includes("Default Title"),
+      "导出前校验应继续展示 Default Title 风险"
+    );
     assert(pageErrors.length === 0, `页面不应有运行时错误：${pageErrors.join("; ")}`);
 
     await browser.close();
@@ -266,7 +247,12 @@ async function run() {
       JSON.stringify(
         {
           ok: true,
-          statuses
+          checks: [
+            "Default Title 变体校验提示",
+            "变体卡片 warning 标记",
+            "批量默认变体风险徽标",
+            "导出前风险保留"
+          ]
         },
         null,
         2

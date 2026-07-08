@@ -125,9 +125,28 @@ function assert(condition, message) {
   }
 }
 
+async function launchBrowser() {
+  const launchCandidates = [
+    { headless: true },
+    { channel: "chrome", headless: true },
+    { channel: "msedge", headless: true }
+  ];
+  let lastError;
+
+  for (const options of launchCandidates) {
+    try {
+      return await chromium.launch(options);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError;
+}
+
 async function run() {
   let browser;
-  browser = await chromium.launch({ headless: true });
+  browser = await launchBrowser();
   try {
   const context = await browser.newContext({
     acceptDownloads: true,
@@ -186,76 +205,83 @@ async function run() {
         return originalFetch(input, init);
       };
 
-      Object.defineProperty(window, "chrome", {
-        configurable: true,
-        value: {
-          runtime: {
-            lastError: null
+      const chromeMock = {
+        runtime: {
+          lastError: null
+        },
+        tabs: {
+          query(_query, callback) {
+            const result = [{ id: 1, title: "Mock Product Page", url: tabUrl }];
+            callback?.(result);
+            return Promise.resolve(result);
           },
-          tabs: {
-            query(_query, callback) {
-              const result = [{ id: 1, title: "Mock Product Page", url: tabUrl }];
-              callback?.(result);
-              return Promise.resolve(result);
-            },
-            create(_options, callback) {
-              const result = { id: 2 };
-              callback?.(result);
-              return Promise.resolve(result);
-            },
-            remove(_tabId, callback) {
-              callback?.();
-              return Promise.resolve();
-            },
-            onUpdated: {
-              addListener() {},
-              removeListener() {}
-            }
+          create(_options, callback) {
+            const result = { id: 2 };
+            callback?.(result);
+            return Promise.resolve(result);
           },
-          scripting: {
-            executeScript(_options, callback) {
-              callback?.();
-            }
+          remove(_tabId, callback) {
+            callback?.();
+            return Promise.resolve();
           },
-          storage: {
-            local: {
-              get(key, callback) {
-                if (typeof key === "string") {
-                  callback({ [key]: storage[key] });
-                  return;
-                }
-
-                if (Array.isArray(key)) {
-                  callback(
-                    key.reduce((result, item) => {
-                      result[item] = storage[item];
-                      return result;
-                    }, {})
-                  );
-                  return;
-                }
-
-                callback({ ...storage });
-              },
-              set(values, callback) {
-                Object.assign(storage, values);
-                callback?.();
-              },
-              remove(key, callback) {
-                [].concat(key).forEach((item) => {
-                  delete storage[item];
-                });
-                callback?.();
+          onUpdated: {
+            addListener() {},
+            removeListener() {}
+          }
+        },
+        scripting: {
+          executeScript(_options, callback) {
+            callback?.();
+          }
+        },
+        storage: {
+          local: {
+            get(key, callback) {
+              if (typeof key === "string") {
+                callback({ [key]: storage[key] });
+                return;
               }
+
+              if (Array.isArray(key)) {
+                callback(
+                  key.reduce((result, item) => {
+                    result[item] = storage[item];
+                    return result;
+                  }, {})
+                );
+                return;
+              }
+
+              callback({ ...storage });
+            },
+            set(values, callback) {
+              Object.assign(storage, values);
+              callback?.();
+            },
+            remove(key, callback) {
+              [].concat(key).forEach((item) => {
+                delete storage[item];
+              });
+              callback?.();
             }
           }
         }
-      });
+      };
+
+      try {
+        Object.defineProperty(window, "chrome", {
+          configurable: true,
+          value: chromeMock
+        });
+      } catch (error) {
+        Object.assign(window.chrome, chromeMock);
+      }
     },
     { batchStorageKey, seedBatch, currentTabUrl }
   );
 
   await page.goto(popupUrl);
+  await page.locator('[data-workspace-tab="batch"]').click();
   try {
     await page.waitForSelector("#batchList .batch-item", { timeout: 8000 });
   } catch (error) {
@@ -296,7 +322,10 @@ async function run() {
     "已有选中成功商品时应允许导出所选"
   );
   await page.locator("#batchVendorInput").fill("Batch Vendor");
+  await page.locator("#batchTypeInput").fill("Batch Type");
   await page.locator("#batchTagsInput").fill("batch-edited, p0");
+  await page.locator("#batchStatusSelect").selectOption("active");
+  await page.locator("#batchPublishedSelect").selectOption("true");
   await page.waitForFunction(() => !document.querySelector("#applyBatchEditButton")?.disabled);
   await page.locator("#applyBatchEditButton").click();
   await page.waitForFunction(() =>
@@ -313,7 +342,12 @@ async function run() {
   const downloadPath = await download.path();
   const csvText = await fs.readFile(downloadPath, "utf8");
   assert(csvText.includes("Batch Vendor"), "批量编辑品牌应写入导出 CSV");
+  assert(csvText.includes("Batch Type"), "批量编辑类型应写入导出 CSV");
   assert(csvText.includes("batch-edited, p0"), "批量编辑标签应写入导出 CSV");
+  assert(
+    csvText.includes('"batch-edited, p0",true,active'),
+    "批量编辑发布状态和商品状态应写入导出 CSV"
+  );
   await download.delete().catch(() => {});
 
   assert(await page.locator("#fixDuplicateHandlesButton").isEnabled(), "重复 handle 应可修复");
@@ -357,7 +391,7 @@ async function run() {
           "恢复批量队列",
           "无图/无价格高亮",
           "导出所选",
-          "批量编辑品牌和标签",
+          "批量编辑品牌、类型、标签、状态和发布设置",
           "重复 handle 修复",
           "多选删除",
           "失败项一键重试",

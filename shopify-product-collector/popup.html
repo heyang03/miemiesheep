@@ -7,649 +7,645 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="popup-shell">
-      <header class="app-header">
-        <div>
-          <p class="eyebrow">Chrome Extension</p>
-          <h1>咩咩采集1.0</h1>
+    <main class="popup-shell" data-active-tab="product">
+      <header class="app-header glass-panel">
+        <div class="brand-lockup">
+          <img class="brand-mark" src="icons/sheep-logo.svg" alt="" />
+          <div>
+            <p class="eyebrow">Chrome Extension</p>
+            <h1>咩咩采集 1.0</h1>
+          </div>
         </div>
-        <div class="version-pill">V1.6</div>
+
+        <div class="header-meta">
+          <span class="domain-pill" id="headerDomainBadge">未识别</span>
+          <span class="site-type-pill" id="siteTypeBadge">未识别</span>
+        </div>
       </header>
 
-      <section class="status-panel" aria-live="polite">
+      <section class="status-panel glass-panel" aria-live="polite">
         <span class="status-dot" id="statusDot"></span>
         <span id="statusText">等待测试采集当前页面</span>
       </section>
 
-      <section class="action-row">
-        <button type="button" id="collectButton">采集当前商品</button>
-        <button type="button" id="exportCsvButton" disabled>导出 CSV</button>
-        <button type="button" class="secondary-button" id="resetAllButton">重置</button>
+      <section class="action-row glass-panel" aria-label="主要操作">
+        <button type="button" class="primary-action" id="collectButton">
+          <span class="button-icon" aria-hidden="true">采</span>
+          采集当前商品
+        </button>
+        <button type="button" class="export-action" id="exportCsvButton" disabled>
+          <span class="button-icon" aria-hidden="true">CSV</span>
+          导出 CSV
+        </button>
+        <details class="more-actions">
+          <summary>更多</summary>
+          <div class="more-actions-menu">
+            <button type="button" class="secondary-button" id="resetAllButton">重置</button>
+            <label class="collector-toggle">
+              <input id="amazonVariantPaginationInput" type="checkbox" />
+              <span>Amazon 完整翻页</span>
+            </label>
+          </div>
+        </details>
       </section>
 
-      <section class="collector-settings" aria-label="采集设置">
-        <label class="collector-toggle">
-          <input id="amazonVariantPaginationInput" type="checkbox" />
-          <span>Amazon 完整翻页</span>
-        </label>
+      <section class="summary-grid" aria-label="采集状态摘要">
+        <button type="button" class="summary-card is-active" data-tab-shortcut="product" aria-pressed="true">
+          <span class="summary-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M6.5 8.5 12 5l5.5 3.5v7L12 19l-5.5-3.5v-7Z" />
+              <path d="M12 12 6.8 8.7M12 12l5.2-3.3M12 12v6.8" />
+            </svg>
+          </span>
+          <span>
+            <strong id="summaryProductStatus">未采集</strong>
+            <small>商品</small>
+          </span>
+        </button>
+        <button type="button" class="summary-card" data-tab-shortcut="images" aria-pressed="false">
+          <span class="summary-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <rect x="4" y="5" width="16" height="14" rx="3" />
+              <path d="m7 16 3.2-3.2 2.4 2.4 2.3-2.8L18 16" />
+              <path d="M8.5 9.2h.1" />
+            </svg>
+          </span>
+          <span>
+            <strong id="summaryImageStatus">0 张</strong>
+            <small>图片</small>
+          </span>
+        </button>
+        <button type="button" class="summary-card" data-tab-shortcut="variants" aria-pressed="false">
+          <span class="summary-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M7 7h10M7 12h10M7 17h10" />
+              <path d="M4.5 7h.1M4.5 12h.1M4.5 17h.1" />
+            </svg>
+          </span>
+          <span>
+            <strong id="summaryVariantStatus">0/0</strong>
+            <small>变体</small>
+          </span>
+        </button>
+        <button type="button" class="summary-card" data-tab-shortcut="batch" aria-pressed="false">
+          <span class="summary-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M8 6h11M8 12h11M8 18h11" />
+              <path d="M4 6h.1M4 12h.1M4 18h.1" />
+            </svg>
+          </span>
+          <span>
+            <strong id="summaryBatchStatus">0 个</strong>
+            <small>队列</small>
+          </span>
+        </button>
+        <button type="button" class="summary-card" data-tab-shortcut="tools" aria-pressed="false">
+          <span class="summary-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M14.7 6.3a3 3 0 0 0-4 4L5.5 15.5a2.1 2.1 0 0 0 3 3l5.2-5.2a3 3 0 0 0 4-4l-2 2-3-3 2-2Z" />
+            </svg>
+          </span>
+          <span>
+            <strong>规则</strong>
+            <small>工具</small>
+          </span>
+        </button>
+        <button type="button" class="summary-card" data-tab-shortcut="validation" aria-pressed="false">
+          <span class="summary-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M12 4.5 19 8v4.6c0 4.2-2.7 6.4-7 7.9-4.3-1.5-7-3.7-7-7.9V8l7-3.5Z" />
+              <path d="m9.5 12.3 1.7 1.7 3.5-4" />
+            </svg>
+          </span>
+          <span>
+            <strong id="summaryRiskStatus">0 风险</strong>
+            <small>校验</small>
+          </span>
+        </button>
       </section>
 
-      <section class="batch-panel collapsible-section" aria-label="多品批量采集">
-        <div class="batch-header accordion-header">
-          <div>
-            <h2
-              class="section-title-toggle"
-              id="batchTitleToggle"
-              role="button"
-              tabindex="0"
-              aria-expanded="true"
-              aria-controls="batchBody"
-            >
-              多品采集
-            </h2>
-            <p class="section-subtitle" id="batchSummary">
-              粘贴商品链接，一行一个；采集完成后可合并导出 Shopify CSV。
-            </p>
-          </div>
-          <div class="batch-header-actions">
-            <span id="batchCount">0 个</span>
-            <button
-              type="button"
-              class="ghost-button section-toggle-button"
-              id="batchToggleButton"
-              aria-expanded="true"
-              aria-controls="batchBody"
-            >
-              收起
-            </button>
-          </div>
-        </div>
+      <nav class="workspace-tabs glass-panel" aria-label="工作区导航">
+        <button type="button" class="workspace-tab is-active" data-workspace-tab="product">
+          商品
+        </button>
+        <button type="button" class="workspace-tab" data-workspace-tab="variants">
+          变体
+        </button>
+        <button type="button" class="workspace-tab" data-workspace-tab="images">
+          图片
+        </button>
+        <button type="button" class="workspace-tab" data-workspace-tab="batch">
+          批量
+        </button>
+        <button type="button" class="workspace-tab" data-workspace-tab="tools">
+          工具
+        </button>
+        <button type="button" class="workspace-tab" data-workspace-tab="validation">
+          校验
+        </button>
+      </nav>
 
-        <div class="collapsible-body" id="batchBody">
-          <label>
-            <span>商品链接列表</span>
-            <textarea
-              id="batchUrlInput"
-              placeholder="https://example.com/products/a&#10;https://example.com/products/b"
-            ></textarea>
-          </label>
+      <section class="workspace-content">
+        <section class="tab-panel is-active" data-tab-panel="product">
+          <section class="product-panel" id="productPanel" hidden>
+            <div class="product-result-panel work-card">
+              <div class="work-card-header accordion-header">
+                <div>
+                  <p class="section-kicker">Single Product</p>
+                  <h2 id="resultTitleToggle" class="section-title-toggle" role="button" tabindex="0" aria-expanded="true" aria-controls="resultBody">商品编辑</h2>
+                  <p class="section-subtitle" id="cacheHint">尚未缓存草稿</p>
+                </div>
+                <div class="badge-row">
+                  <span id="sourceBadge">未采集</span>
+                  <button type="button" class="ghost-button section-toggle-button" id="resultToggleButton" aria-expanded="true" aria-controls="resultBody">收起</button>
+                  <button type="button" class="ghost-button" id="clearDraftButton">清空</button>
+                </div>
+              </div>
 
-          <div class="batch-actions">
-            <button type="button" class="ghost-button" id="discoverBatchUrlsButton">
-              发现当前页商品
-            </button>
-            <button type="button" class="ghost-button" id="prepareBatchButton">
-              生成队列
-            </button>
-            <button type="button" class="ghost-button" id="precheckBatchButton" disabled>
-              预检查链接
-            </button>
-            <button type="button" class="ghost-button" id="startBatchButton" disabled>
-              开始采集
-            </button>
-            <button type="button" class="ghost-button" id="stopBatchButton" disabled>
-              停止
-            </button>
-            <button type="button" class="ghost-button" id="exportBatchCsvButton" disabled>
-              导出多品 CSV
-            </button>
-            <button type="button" class="ghost-button" id="exportSelectedBatchCsvButton" disabled>
-              导出所选
-            </button>
-            <button type="button" class="ghost-button" id="retryFailedBatchButton" disabled>
-              重试失败
-            </button>
-            <button type="button" class="ghost-button" id="selectAllBatchButton" disabled>
-              全选
-            </button>
-            <button type="button" class="ghost-button danger-ghost-button" id="deleteSelectedBatchButton" disabled>
-              删除所选
-            </button>
-            <button type="button" class="ghost-button" id="fixDuplicateHandlesButton" disabled>
-              修复重复 Handle
-            </button>
-            <button type="button" class="ghost-button danger-ghost-button" id="clearBatchButton" disabled>
-              清空队列
-            </button>
-          </div>
+              <div class="product-summary collapsible-body" id="resultBody">
+                <section class="form-cluster">
+                  <div class="cluster-heading">
+                    <h3>基础信息</h3>
+                    <span>运营最常改的字段</span>
+                  </div>
+                  <label class="field-wide">
+                    <span>商品标题</span>
+                    <input id="productTitle" type="text" placeholder="未识别" />
+                  </label>
 
-          <div class="batch-settings">
-            <label>
-              <span>采集超时</span>
-              <input id="batchTimeoutInput" type="number" min="8" max="90" step="1" value="35" />
-            </label>
-            <span>秒，影响链接预检查、API 直采和后台标签页等待。</span>
-          </div>
+                  <div class="two-column">
+                    <label>
+                      <span>价格</span>
+                      <input id="productPrice" type="text" placeholder="未识别" />
+                    </label>
+                    <label>
+                      <span>原价/对比价</span>
+                      <input id="productCompareAtPrice" type="text" placeholder="例如原价或划线价" />
+                    </label>
+                  </div>
 
-          <div class="batch-progress">
-            <span id="batchProgressText">等待生成队列</span>
-            <progress id="batchProgressBar" max="100" value="0"></progress>
-          </div>
+                  <div class="two-column">
+                    <label>
+                      <span>SKU</span>
+                      <input id="productSku" type="text" placeholder="未识别" />
+                    </label>
+                    <label>
+                      <span>品牌/供应商</span>
+                      <input id="productVendor" type="text" placeholder="未识别" />
+                    </label>
+                  </div>
 
-          <label class="list-search-control">
-            <span>搜索商品</span>
-            <input id="batchSearchInput" type="search" placeholder="输入标题、URL、Handle、SKU" />
-          </label>
+                  <div class="two-column">
+                    <label>
+                      <span>商品类型</span>
+                      <input id="productType" type="text" placeholder="可选" />
+                    </label>
+                    <label>
+                      <span>标签</span>
+                      <input id="productTags" type="text" placeholder="逗号分隔" />
+                    </label>
+                  </div>
 
-          <section class="batch-utility-panel batch-edit-panel" id="batchEditPanel">
-            <div class="batch-panel-header">
-              <h3>批量编辑</h3>
-              <span id="batchEditSummary">选择成功商品后可编辑</span>
+                  <div class="two-column">
+                    <label>
+                      <span>商品状态</span>
+                      <select id="productStatus">
+                        <option value="active">启用</option>
+                        <option value="draft">草稿</option>
+                        <option value="archived">归档</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>网店发布</span>
+                      <select id="productPublished">
+                        <option value="false">不发布</option>
+                        <option value="true">发布</option>
+                      </select>
+                    </label>
+                  </div>
+                </section>
+
+                <section class="form-cluster">
+                  <div class="cluster-heading">
+                    <h3>Handle & SEO</h3>
+                    <span>用于 Shopify URL 和搜索摘要</span>
+                  </div>
+                  <label class="field-wide">
+                    <span>URL handle</span>
+                    <div class="inline-control">
+                      <input id="productHandle" type="text" placeholder="未生成" />
+                      <button type="button" class="mini-button" id="regenerateHandleButton">
+                        生成
+                      </button>
+                    </div>
+                  </label>
+                </section>
+
+                <section class="form-cluster">
+                  <div class="cluster-heading">
+                    <h3>商品描述</h3>
+                    <span>支持直接编辑清洗后的描述</span>
+                  </div>
+                  <label class="field-wide">
+                    <span>描述内容</span>
+                    <textarea id="productDescription" placeholder="未识别"></textarea>
+                  </label>
+                </section>
+              </div>
             </div>
-            <div class="batch-edit-grid">
-              <label>
-                <span>品牌/供应商</span>
-                <input id="batchVendorInput" type="text" placeholder="非空时覆盖所选商品" />
-              </label>
-              <label>
-                <span>标签</span>
-                <input id="batchTagsInput" type="text" placeholder="逗号分隔，非空时覆盖所选商品" />
-              </label>
-            </div>
-            <button type="button" class="ghost-button" id="applyBatchEditButton" disabled>
-              应用到所选成功商品
-            </button>
           </section>
 
-          <section class="batch-utility-panel batch-report-panel" id="batchReportPanel" hidden>
-            <div class="batch-panel-header">
-              <h3>批量汇总</h3>
-              <span id="batchReportSummary">等待队列</span>
+          <section class="empty-product-card work-card">
+            <div class="empty-illustration">
+              <img src="icons/sheep-logo.svg" alt="" />
             </div>
-            <div class="batch-report-grid" id="batchReportStats"></div>
+            <h2>还没有商品草稿</h2>
+            <p>先采集当前页面，或者切到批量采集处理商品链接队列。</p>
           </section>
-
-          <section class="batch-utility-panel batch-validation-panel" id="batchValidationPanel" hidden>
-            <div class="batch-panel-header">
-              <h3>导出校验</h3>
-              <span id="batchValidationSummary">等待校验</span>
-            </div>
-            <ul class="batch-validation-list" id="batchValidationList"></ul>
-          </section>
-
-          <section class="batch-utility-panel batch-log-panel" id="batchLogPanel" hidden>
-            <div class="batch-panel-header">
-              <h3>采集日志</h3>
-              <button type="button" class="ghost-button" id="clearBatchLogButton">
-                清空日志
-              </button>
-            </div>
-            <ul class="batch-log-list" id="batchLogList"></ul>
-          </section>
-
-          <div class="batch-list" id="batchList" aria-label="批量采集队列"></div>
-        </div>
-      </section>
-
-      <section class="info-grid" aria-label="当前页面信息">
-        <div class="readonly-info">
-          <span>页面标题</span>
-          <p id="pageTitle">尚未采集</p>
-        </div>
-
-        <div class="readonly-info readonly-info-wide">
-          <span>页面 URL</span>
-          <p id="pageUrl">尚未采集</p>
-        </div>
-
-        <div class="readonly-info">
-          <span>当前域名</span>
-          <p id="pageDomain">尚未识别</p>
-        </div>
-      </section>
-
-      <section class="site-rule-panel collapsible-section is-collapsed" aria-label="站点采集规则">
-        <div class="site-rule-header accordion-header">
-          <div>
-            <h2
-              class="section-title-toggle"
-              id="siteRuleTitleToggle"
-              role="button"
-              tabindex="0"
-              aria-expanded="false"
-              aria-controls="siteRuleBody"
-            >
-              站点规则
-            </h2>
-            <p class="section-subtitle" id="siteRuleSummary">
-              内置规则自动启用；可像选择图片区域一样点击页面元素生成专属规则。
-            </p>
-          </div>
-          <div class="site-rule-header-actions">
-            <span id="siteRuleDomain">未识别</span>
-            <button
-              type="button"
-              class="ghost-button section-toggle-button"
-              id="siteRuleToggleButton"
-              aria-expanded="false"
-              aria-controls="siteRuleBody"
-            >
-              展开
-            </button>
-          </div>
-        </div>
-
-        <div class="collapsible-body" id="siteRuleBody" hidden>
-          <div class="site-rule-grid">
-            <label>
-              <span>标题规则</span>
-              <div class="site-rule-field">
-                <input id="siteRuleTitleSelector" type="text" readonly placeholder="点击选择标题元素" />
-                <button type="button" class="ghost-button site-rule-pick-button" data-site-rule-field="title">
-                  选择
-                </button>
-                <button type="button" class="ghost-button danger-ghost-button site-rule-clear-button" data-site-rule-clear-field="title">
-                  清除
-                </button>
-              </div>
-            </label>
-            <label>
-              <span>价格规则</span>
-              <div class="site-rule-field">
-                <input id="siteRulePriceSelector" type="text" readonly placeholder="点击选择价格元素" />
-                <button type="button" class="ghost-button site-rule-pick-button" data-site-rule-field="price">
-                  选择
-                </button>
-                <button type="button" class="ghost-button danger-ghost-button site-rule-clear-button" data-site-rule-clear-field="price">
-                  清除
-                </button>
-              </div>
-            </label>
-            <label>
-              <span>原价规则</span>
-              <div class="site-rule-field">
-                <input id="siteRuleCompareAtPriceSelector" type="text" readonly placeholder="点击选择原价/划线价元素" />
-                <button type="button" class="ghost-button site-rule-pick-button" data-site-rule-field="compareAtPrice">
-                  选择
-                </button>
-                <button type="button" class="ghost-button danger-ghost-button site-rule-clear-button" data-site-rule-clear-field="compareAtPrice">
-                  清除
-                </button>
-              </div>
-            </label>
-            <label>
-              <span>描述规则</span>
-              <div class="site-rule-field">
-                <input id="siteRuleDescriptionSelector" type="text" readonly placeholder="点击选择描述元素" />
-                <button type="button" class="ghost-button site-rule-pick-button" data-site-rule-field="description">
-                  选择
-                </button>
-                <button type="button" class="ghost-button danger-ghost-button site-rule-clear-button" data-site-rule-clear-field="description">
-                  清除
-                </button>
-              </div>
-            </label>
-            <label>
-              <span>品牌规则</span>
-              <div class="site-rule-field">
-                <input id="siteRuleVendorSelector" type="text" readonly placeholder="点击选择品牌元素" />
-                <button type="button" class="ghost-button site-rule-pick-button" data-site-rule-field="vendor">
-                  选择
-                </button>
-                <button type="button" class="ghost-button danger-ghost-button site-rule-clear-button" data-site-rule-clear-field="vendor">
-                  清除
-                </button>
-              </div>
-            </label>
-            <label>
-              <span>SKU 规则</span>
-              <div class="site-rule-field">
-                <input id="siteRuleSkuSelector" type="text" readonly placeholder="点击选择 SKU 元素" />
-                <button type="button" class="ghost-button site-rule-pick-button" data-site-rule-field="sku">
-                  选择
-                </button>
-                <button type="button" class="ghost-button danger-ghost-button site-rule-clear-button" data-site-rule-clear-field="sku">
-                  清除
-                </button>
-              </div>
-            </label>
-            <label class="site-rule-wide">
-              <span>图片区域规则</span>
-              <div class="site-rule-field">
-                <input id="siteRuleImageSelector" type="text" readonly placeholder="点击选择图片区域" />
-                <button type="button" class="ghost-button site-rule-pick-button" data-site-rule-field="images">
-                  选择
-                </button>
-                <button type="button" class="ghost-button danger-ghost-button site-rule-clear-button" data-site-rule-clear-field="images">
-                  清除
-                </button>
-              </div>
-            </label>
-            <label class="site-rule-wide">
-              <span>变体区域规则</span>
-              <div class="site-rule-field">
-                <input id="siteRuleVariantSelector" type="text" readonly placeholder="点击选择包含多个套餐/规格的变体区域" />
-                <button type="button" class="ghost-button site-rule-pick-button" data-site-rule-field="variants">
-                  选择
-                </button>
-                <button type="button" class="ghost-button danger-ghost-button site-rule-clear-button" data-site-rule-clear-field="variants">
-                  清除
-                </button>
-              </div>
-            </label>
-          </div>
-          <div class="site-rule-actions">
-            <button type="button" class="ghost-button" id="testSiteRuleButton">
-              测试规则
-            </button>
-            <button type="button" class="ghost-button" id="saveSiteRuleButton">
-              保存当前选择
-            </button>
-            <button type="button" class="ghost-button danger-ghost-button" id="clearSiteRuleButton">
-              清除全部
-            </button>
-          </div>
-          <section class="site-rule-test-panel" id="siteRuleTestPanel" hidden>
-            <div class="site-rule-test-header">
-              <h3>测试返回</h3>
-              <span id="siteRuleTestSummary">等待测试</span>
-            </div>
-            <ul id="siteRuleTestList"></ul>
-          </section>
-        </div>
-      </section>
-
-      <section class="product-panel" id="productPanel" hidden>
-        <div class="product-result-panel collapsible-section">
-          <div class="section-title accordion-header">
-          <div>
-            <h2
-              class="section-title-toggle"
-              id="resultTitleToggle"
-              role="button"
-              tabindex="0"
-              aria-expanded="true"
-              aria-controls="resultBody"
-            >
-              采集结果
-            </h2>
-            <p class="section-subtitle" id="cacheHint">尚未缓存草稿</p>
-          </div>
-          <div class="badge-row">
-            <span id="sourceBadge">未采集</span>
-            <button
-              type="button"
-              class="ghost-button section-toggle-button"
-              id="resultToggleButton"
-              aria-expanded="true"
-              aria-controls="resultBody"
-            >
-              收起
-            </button>
-            <button type="button" class="ghost-button" id="clearDraftButton">清空</button>
-          </div>
-          </div>
-
-          <div class="collapsible-body" id="resultBody">
-        <div class="product-summary">
-          <label>
-            <span>商品标题</span>
-            <input id="productTitle" type="text" placeholder="未识别" />
-          </label>
-
-          <div class="two-column">
-            <label>
-              <span>价格</span>
-              <input id="productPrice" type="text" placeholder="未识别" />
-            </label>
-
-            <label>
-              <span>原价/对比价</span>
-              <input id="productCompareAtPrice" type="text" placeholder="例如原价或划线价" />
-            </label>
-          </div>
-
-          <div class="two-column">
-            <label>
-              <span>SKU</span>
-              <input id="productSku" type="text" placeholder="未识别" />
-            </label>
-
-            <label>
-              <span>品牌/供应商</span>
-              <input id="productVendor" type="text" placeholder="未识别" />
-            </label>
-          </div>
-
-          <div class="two-column">
-            <label>
-              <span>商品类型</span>
-              <input id="productType" type="text" placeholder="可选" />
-            </label>
-
-            <label>
-              <span>标签</span>
-              <input id="productTags" type="text" placeholder="逗号分隔" />
-            </label>
-          </div>
-
-          <div class="two-column">
-            <label>
-              <span>商品状态</span>
-              <select id="productStatus">
-                <option value="active">启用</option>
-                <option value="draft">草稿</option>
-                <option value="archived">归档</option>
-              </select>
-            </label>
-
-            <label>
-              <span>网店发布</span>
-              <select id="productPublished">
-                <option value="false">不发布</option>
-                <option value="true">发布</option>
-              </select>
-            </label>
-          </div>
-
-          <label>
-            <span>URL handle</span>
-            <div class="inline-control">
-              <input id="productHandle" type="text" placeholder="未生成" />
-              <button type="button" class="mini-button" id="regenerateHandleButton">
-                生成
-              </button>
-            </div>
-          </label>
-
-          <label>
-            <span>商品描述</span>
-            <textarea id="productDescription" placeholder="未识别"></textarea>
-          </label>
-        </div>
-          </div>
-        </div>
-
-        <section class="variant-panel collapsible-section" aria-label="商品变体编辑">
-          <div class="variant-header accordion-header">
-            <h2
-              class="section-title-toggle"
-              id="variantTitleToggle"
-              role="button"
-              tabindex="0"
-              aria-expanded="true"
-              aria-controls="variantBody"
-            >
-              变体
-            </h2>
-            <div class="variant-toolbar">
-              <span id="variantCount">1 个</span>
-              <label class="list-search-control variant-search-control">
-                <span>搜索变体</span>
-                <input id="variantSearchInput" type="search" placeholder="颜色、规格、SKU、价格" />
-              </label>
-              <button type="button" class="ghost-button" id="variantSelectAllButton">
-                全选
-              </button>
-              <button
-                type="button"
-                class="ghost-button danger-ghost-button"
-                id="deleteSelectedVariantsButton"
-                disabled
-              >
-                删除所选
-              </button>
-              <button
-                type="button"
-                class="ghost-button"
-                id="excludeSelectedVariantsButton"
-                disabled
-              >
-                不导出所选
-              </button>
-              <button
-                type="button"
-                class="ghost-button"
-                id="includeSelectedVariantsButton"
-                disabled
-              >
-                恢复导出
-              </button>
-              <button
-                type="button"
-                class="ghost-button"
-                id="mergeDuplicateVariantsButton"
-                disabled
-              >
-                合并重复
-              </button>
-              <button
-                type="button"
-                class="ghost-button"
-                id="fillVariantSkuButton"
-                disabled
-              >
-                补齐 SKU
-              </button>
-              <button
-                type="button"
-                class="ghost-button"
-                id="checkVariantsButton"
-              >
-                检查变体
-              </button>
-              <button
-                type="button"
-                class="ghost-button section-toggle-button"
-                id="variantToggleButton"
-                aria-expanded="true"
-                aria-controls="variantBody"
-              >
-                收起
-              </button>
-              <button type="button" class="ghost-button" id="addVariantButton">
-                添加变体
-              </button>
-            </div>
-          </div>
-          <div class="collapsible-body" id="variantBody">
-            <div class="variant-list" id="variantList"></div>
-          </div>
         </section>
 
-        <section class="validation-panel" id="validationPanel" aria-live="polite" hidden>
-          <div class="validation-header">
-            <h2>导出校验</h2>
-            <span id="validationSummary">等待校验</span>
-          </div>
-          <ul id="validationList"></ul>
+        <section class="tab-panel" data-tab-panel="variants" hidden>
+          <section class="variant-panel work-card" aria-label="商品变体编辑">
+            <div class="variant-header work-card-header accordion-header">
+              <div>
+                <p class="section-kicker">Variants</p>
+                <h2 id="variantTitleToggle" class="section-title-toggle" role="button" tabindex="0" aria-expanded="true" aria-controls="variantBody">
+                  多变体管理
+                </h2>
+                <p class="section-subtitle">默认展示关键字段，展开卡片后编辑完整 Shopify 变体。</p>
+              </div>
+              <div class="variant-toolbar">
+                <span id="variantCount">0/0 导出</span>
+                <label class="list-search-control variant-search-control">
+                  <span>搜索变体</span>
+                  <input id="variantSearchInput" type="search" placeholder="颜色、规格、SKU、价格" />
+                </label>
+              </div>
+            </div>
+
+            <div class="toolbar-strip">
+              <button type="button" class="ghost-button" id="variantSelectAllButton">全选</button>
+              <button type="button" class="ghost-button" id="addVariantButton">添加变体</button>
+              <button type="button" class="ghost-button" id="mergeDuplicateVariantsButton" disabled>合并重复</button>
+              <button type="button" class="ghost-button" id="fillVariantSkuButton" disabled>补齐 SKU</button>
+              <button type="button" class="ghost-button" id="checkVariantsButton">检查变体</button>
+              <button type="button" class="ghost-button" id="excludeSelectedVariantsButton" disabled>不导出所选</button>
+              <button type="button" class="ghost-button" id="includeSelectedVariantsButton" disabled>恢复导出</button>
+              <button type="button" class="ghost-button danger-ghost-button" id="deleteSelectedVariantsButton" disabled>删除所选</button>
+              <button type="button" class="ghost-button section-toggle-button" id="variantToggleButton" aria-expanded="true" aria-controls="variantBody">收起</button>
+            </div>
+
+            <div class="collapsible-body" id="variantBody">
+              <div class="variant-list" id="variantList"></div>
+            </div>
+          </section>
         </section>
 
-        <div class="image-panel collapsible-section">
-        <div class="image-header accordion-header">
-          <h2
-            class="section-title-toggle"
-            id="imageTitleToggle"
-            role="button"
-            tabindex="0"
-            aria-expanded="true"
-            aria-controls="imageBody"
-          >
-            图片
-          </h2>
-          <div class="image-meta">
-            <button type="button" class="ghost-button" id="selectImageAreaButton">
-              选择区域
-            </button>
-            <button type="button" class="ghost-button" id="addImageButton">
-              添加图片
-            </button>
-            <button type="button" class="ghost-button" id="imageSelectAllButton">
-              全选
-            </button>
-            <button type="button" class="ghost-button" id="checkImagesButton">
-              检查图片
-            </button>
-            <button type="button" class="ghost-button" id="filterSmallImagesButton">
-              过滤小图
-            </button>
-            <button type="button" class="ghost-button" id="filterDuplicateImagesButton">
-              去重
-            </button>
-            <button type="button" class="ghost-button" id="fillImageAltButton">
-              补 Alt
-            </button>
-            <button
-              type="button"
-              class="ghost-button danger-ghost-button"
-              id="deleteSelectedImagesButton"
-              disabled
-            >
-              删除所选
-            </button>
-            <button type="button" class="ghost-button" id="resetImageModeButton">
-              自动采图
-            </button>
-            <button
-              type="button"
-              class="ghost-button section-toggle-button"
-              id="imageToggleButton"
-              aria-expanded="true"
-              aria-controls="imageBody"
-            >
-              收起
-            </button>
-            <span id="imageSourceInfo">自动</span>
-            <span id="imageCount">0 张</span>
-          </div>
-          <div class="image-tools">
-            <label>
-              <span>来源筛选</span>
-              <select id="imageSourceFilter">
-                <option value="all">全部图片</option>
-                <option value="valid">有效图片</option>
-                <option value="risk">风险图片</option>
-                <option value="unchecked">未检查</option>
-                <option value="small">小图</option>
-                <option value="invalid">失效</option>
-                <option value="shopify">Shopify/CDN</option>
-                <option value="amazon">Amazon</option>
-                <option value="manual">手动区域</option>
-                <option value="other">其他来源</option>
-              </select>
-            </label>
-            <label>
-              <span>旧域名</span>
-              <input id="imageReplaceFromInput" type="text" placeholder="old.example.com" />
-            </label>
-            <label>
-              <span>新域名</span>
-              <input id="imageReplaceToInput" type="text" placeholder="cdn.example.com" />
-            </label>
-            <button type="button" class="ghost-button" id="replaceImageDomainButton">
-              替换域名
-            </button>
-          </div>
-        </div>
+        <section class="tab-panel" data-tab-panel="images" hidden>
+          <section class="image-panel work-card">
+            <div class="image-header work-card-header accordion-header">
+              <div>
+                <p class="section-kicker">Images</p>
+                <h2 id="imageTitleToggle" class="section-title-toggle" role="button" tabindex="0" aria-expanded="true" aria-controls="imageBody">
+                  图片管理器
+                </h2>
+                <p class="section-subtitle">主图、质量检查、Alt 和域名替换集中处理。</p>
+              </div>
+              <div class="image-counts">
+                <span id="imageSourceInfo">自动</span>
+                <span id="imageCount">0 张</span>
+              </div>
+            </div>
 
-        <div class="collapsible-body" id="imageBody">
-          <div class="image-grid" id="imageGrid" aria-label="商品图片预览"></div>
-        </div>
-        </div>
+            <div class="image-toolbar">
+              <button type="button" class="ghost-button emphasized" id="selectImageAreaButton">选择区域</button>
+              <button type="button" class="ghost-button" id="addImageButton">添加图片</button>
+              <button type="button" class="ghost-button" id="checkImagesButton">检查图片</button>
+              <button type="button" class="ghost-button" id="imageSelectAllButton">全选</button>
+              <details class="compact-menu">
+                <summary>图片工具</summary>
+                <div>
+                  <button type="button" class="ghost-button" id="filterSmallImagesButton">过滤小图</button>
+                  <button type="button" class="ghost-button" id="filterDuplicateImagesButton">去重</button>
+                  <button type="button" class="ghost-button" id="fillImageAltButton">补 Alt</button>
+                  <button type="button" class="ghost-button" id="resetImageModeButton">自动采图</button>
+                  <button type="button" class="ghost-button danger-ghost-button" id="deleteSelectedImagesButton" disabled>删除所选</button>
+                  <button type="button" class="ghost-button section-toggle-button" id="imageToggleButton" aria-expanded="true" aria-controls="imageBody">收起</button>
+                </div>
+              </details>
+            </div>
+
+            <div class="image-tools">
+              <label>
+                <span>来源筛选</span>
+                <select id="imageSourceFilter">
+                  <option value="all">全部图片</option>
+                  <option value="valid">有效图片</option>
+                  <option value="risk">风险图片</option>
+                  <option value="unchecked">未检查</option>
+                  <option value="small">小图</option>
+                  <option value="invalid">失效</option>
+                  <option value="shopify">Shopify/CDN</option>
+                  <option value="amazon">Amazon</option>
+                  <option value="manual">手动区域</option>
+                  <option value="other">其他来源</option>
+                </select>
+              </label>
+              <label>
+                <span>旧域名</span>
+                <input id="imageReplaceFromInput" type="text" placeholder="old.example.com" />
+              </label>
+              <label>
+                <span>新域名</span>
+                <input id="imageReplaceToInput" type="text" placeholder="cdn.example.com" />
+              </label>
+              <button type="button" class="ghost-button" id="replaceImageDomainButton">替换域名</button>
+            </div>
+
+            <div class="collapsible-body" id="imageBody">
+              <div class="image-grid" id="imageGrid" aria-label="商品图片预览"></div>
+            </div>
+          </section>
+        </section>
+
+        <section class="tab-panel" data-tab-panel="batch" hidden>
+          <section class="batch-panel work-card" aria-label="多品批量采集">
+            <div class="batch-header work-card-header accordion-header">
+              <div>
+                <p class="section-kicker">Batch Mode</p>
+                <h2 id="batchTitleToggle" class="section-title-toggle" role="button" tabindex="0" aria-expanded="true" aria-controls="batchBody">
+                  多品采集
+                </h2>
+                <p class="section-subtitle" id="batchSummary">粘贴商品链接，一行一个；采集完成后可合并导出 Shopify CSV。</p>
+              </div>
+              <div class="batch-header-actions">
+                <span id="batchCount">0 个</span>
+                <button type="button" class="ghost-button section-toggle-button" id="batchToggleButton" aria-expanded="true" aria-controls="batchBody">收起</button>
+              </div>
+            </div>
+
+            <div class="collapsible-body" id="batchBody">
+              <label class="batch-url-field">
+                <span>商品链接列表</span>
+                <textarea id="batchUrlInput" placeholder="https://example.com/products/a&#10;https://example.com/products/b"></textarea>
+              </label>
+
+              <div class="batch-actions">
+                <button type="button" class="ghost-button emphasized" id="discoverBatchUrlsButton">发现当前页商品</button>
+                <button type="button" class="ghost-button" id="prepareBatchButton">生成队列</button>
+                <button type="button" class="ghost-button" id="precheckBatchButton" disabled>预检查链接</button>
+                <button type="button" class="ghost-button primary-small" id="startBatchButton" disabled>开始采集</button>
+                <button type="button" class="ghost-button" id="stopBatchButton" disabled>停止</button>
+                <button type="button" class="ghost-button" id="exportBatchCsvButton" disabled>导出多品 CSV</button>
+                <button type="button" class="ghost-button" id="exportSelectedBatchCsvButton" disabled>导出所选</button>
+                <button type="button" class="ghost-button" id="retryFailedBatchButton" disabled>重试失败</button>
+                <button type="button" class="ghost-button" id="selectAllBatchButton" disabled>全选</button>
+                <button type="button" class="ghost-button" id="fixDuplicateHandlesButton" disabled>修复重复 Handle</button>
+                <button type="button" class="ghost-button danger-ghost-button" id="deleteSelectedBatchButton" disabled>删除所选</button>
+                <button type="button" class="ghost-button danger-ghost-button" id="clearBatchButton" disabled>清空队列</button>
+              </div>
+
+              <details class="advanced-settings">
+                <summary>高级采集设置</summary>
+                <div class="batch-settings">
+                  <label>
+                    <span>采集超时</span>
+                    <input id="batchTimeoutInput" type="number" min="8" max="90" step="1" value="35" />
+                  </label>
+                  <span>秒，影响链接预检查、API 直采和后台标签页等待。</span>
+                </div>
+              </details>
+
+              <div class="batch-progress">
+                <span id="batchProgressText">等待生成队列</span>
+                <progress id="batchProgressBar" max="100" value="0"></progress>
+              </div>
+
+              <label class="list-search-control batch-search-control">
+                <span>搜索商品</span>
+                <input id="batchSearchInput" type="search" placeholder="输入标题、URL、Handle、SKU" />
+              </label>
+
+              <section class="batch-utility-panel batch-edit-panel" id="batchEditPanel">
+                <div class="batch-panel-header">
+                  <h3>批量编辑</h3>
+                  <span id="batchEditSummary">选择成功商品后可编辑</span>
+                </div>
+                <div class="batch-edit-grid">
+                  <label>
+                    <span>品牌/供应商</span>
+                    <input id="batchVendorInput" type="text" placeholder="非空时覆盖所选商品" />
+                  </label>
+                  <label>
+                    <span>商品类型</span>
+                    <input id="batchTypeInput" type="text" placeholder="非空时覆盖所选商品" />
+                  </label>
+                  <label>
+                    <span>标签</span>
+                    <input id="batchTagsInput" type="text" placeholder="逗号分隔，非空时覆盖所选商品" />
+                  </label>
+                  <label>
+                    <span>商品状态</span>
+                    <select id="batchStatusSelect">
+                      <option value="">不修改</option>
+                      <option value="active">启用</option>
+                      <option value="draft">草稿</option>
+                      <option value="archived">归档</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>网店发布</span>
+                    <select id="batchPublishedSelect">
+                      <option value="">不修改</option>
+                      <option value="true">发布</option>
+                      <option value="false">不发布</option>
+                    </select>
+                  </label>
+                </div>
+                <button type="button" class="ghost-button emphasized" id="applyBatchEditButton" disabled>应用到所选成功商品</button>
+              </section>
+
+              <section class="batch-utility-panel batch-report-panel" id="batchReportPanel" hidden>
+                <div class="batch-panel-header">
+                  <h3>批量汇总</h3>
+                  <span id="batchReportSummary">等待队列</span>
+                </div>
+                <div class="batch-report-grid" id="batchReportStats"></div>
+              </section>
+
+              <section class="batch-utility-panel batch-validation-panel" id="batchValidationPanel" hidden>
+                <div class="batch-panel-header">
+                  <h3>导出校验</h3>
+                  <span id="batchValidationSummary">等待校验</span>
+                </div>
+                <ul class="batch-validation-list" id="batchValidationList"></ul>
+              </section>
+
+              <section class="batch-utility-panel batch-log-panel" id="batchLogPanel" hidden>
+                <div class="batch-panel-header">
+                  <h3>采集日志</h3>
+                  <button type="button" class="ghost-button" id="clearBatchLogButton">清空日志</button>
+                </div>
+                <ul class="batch-log-list" id="batchLogList"></ul>
+              </section>
+
+              <div class="batch-list" id="batchList" aria-label="批量采集队列"></div>
+            </div>
+          </section>
+        </section>
+
+        <section class="tab-panel" data-tab-panel="tools" hidden>
+          <section class="context-panel work-card" aria-label="当前页面信息">
+            <div class="work-card-header">
+              <div>
+                <p class="section-kicker">Page Context</p>
+                <h2>当前页面</h2>
+                <p class="section-subtitle">用于站点规则、缓存草稿和当前标签页识别。</p>
+              </div>
+            </div>
+            <div class="info-grid">
+              <div class="readonly-info">
+                <span>页面标题</span>
+                <p id="pageTitle">尚未采集</p>
+              </div>
+              <div class="readonly-info readonly-info-wide">
+                <span>页面 URL</span>
+                <p id="pageUrl">尚未采集</p>
+              </div>
+              <div class="readonly-info">
+                <span>当前域名</span>
+                <p id="pageDomain">尚未识别</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="site-rule-panel work-card is-collapsed" aria-label="站点采集规则">
+            <div class="site-rule-header work-card-header accordion-header">
+              <div>
+                <p class="section-kicker">Advanced Rules</p>
+                <h2 id="siteRuleTitleToggle" class="section-title-toggle" role="button" tabindex="0" aria-expanded="false" aria-controls="siteRuleBody">
+                  站点规则
+                </h2>
+                <p class="section-subtitle" id="siteRuleSummary">内置规则自动启用；可像选择图片区域一样点击页面元素生成专属规则。</p>
+              </div>
+              <div class="site-rule-header-actions">
+                <span id="siteRuleDomain">未识别</span>
+                <button type="button" class="ghost-button section-toggle-button" id="siteRuleToggleButton" aria-expanded="false" aria-controls="siteRuleBody">展开</button>
+              </div>
+            </div>
+
+            <div class="collapsible-body" id="siteRuleBody" hidden>
+              <div class="site-rule-grid">
+                <label>
+                  <span>标题规则</span>
+                  <div class="site-rule-field">
+                    <input id="siteRuleTitleSelector" type="text" readonly placeholder="点击选择标题元素" />
+                    <button type="button" class="ghost-button site-rule-pick-button" data-site-rule-field="title">选择</button>
+                    <button type="button" class="ghost-button danger-ghost-button site-rule-clear-button" data-site-rule-clear-field="title">清除</button>
+                  </div>
+                </label>
+                <label>
+                  <span>价格规则</span>
+                  <div class="site-rule-field">
+                    <input id="siteRulePriceSelector" type="text" readonly placeholder="点击选择价格元素" />
+                    <button type="button" class="ghost-button site-rule-pick-button" data-site-rule-field="price">选择</button>
+                    <button type="button" class="ghost-button danger-ghost-button site-rule-clear-button" data-site-rule-clear-field="price">清除</button>
+                  </div>
+                </label>
+                <label>
+                  <span>原价规则</span>
+                  <div class="site-rule-field">
+                    <input id="siteRuleCompareAtPriceSelector" type="text" readonly placeholder="点击选择原价/划线价元素" />
+                    <button type="button" class="ghost-button site-rule-pick-button" data-site-rule-field="compareAtPrice">选择</button>
+                    <button type="button" class="ghost-button danger-ghost-button site-rule-clear-button" data-site-rule-clear-field="compareAtPrice">清除</button>
+                  </div>
+                </label>
+                <label>
+                  <span>描述规则</span>
+                  <div class="site-rule-field">
+                    <input id="siteRuleDescriptionSelector" type="text" readonly placeholder="点击选择描述元素" />
+                    <button type="button" class="ghost-button site-rule-pick-button" data-site-rule-field="description">选择</button>
+                    <button type="button" class="ghost-button danger-ghost-button site-rule-clear-button" data-site-rule-clear-field="description">清除</button>
+                  </div>
+                </label>
+                <label>
+                  <span>品牌规则</span>
+                  <div class="site-rule-field">
+                    <input id="siteRuleVendorSelector" type="text" readonly placeholder="点击选择品牌元素" />
+                    <button type="button" class="ghost-button site-rule-pick-button" data-site-rule-field="vendor">选择</button>
+                    <button type="button" class="ghost-button danger-ghost-button site-rule-clear-button" data-site-rule-clear-field="vendor">清除</button>
+                  </div>
+                </label>
+                <label>
+                  <span>SKU 规则</span>
+                  <div class="site-rule-field">
+                    <input id="siteRuleSkuSelector" type="text" readonly placeholder="点击选择 SKU 元素" />
+                    <button type="button" class="ghost-button site-rule-pick-button" data-site-rule-field="sku">选择</button>
+                    <button type="button" class="ghost-button danger-ghost-button site-rule-clear-button" data-site-rule-clear-field="sku">清除</button>
+                  </div>
+                </label>
+                <label class="site-rule-wide">
+                  <span>图片区域规则</span>
+                  <div class="site-rule-field">
+                    <input id="siteRuleImageSelector" type="text" readonly placeholder="点击选择图片区域" />
+                    <button type="button" class="ghost-button site-rule-pick-button" data-site-rule-field="images">选择</button>
+                    <button type="button" class="ghost-button danger-ghost-button site-rule-clear-button" data-site-rule-clear-field="images">清除</button>
+                  </div>
+                </label>
+                <label class="site-rule-wide">
+                  <span>变体区域规则</span>
+                  <div class="site-rule-field">
+                    <input id="siteRuleVariantSelector" type="text" readonly placeholder="点击选择包含多个套餐/规格的变体区域" />
+                    <button type="button" class="ghost-button site-rule-pick-button" data-site-rule-field="variants">选择</button>
+                    <button type="button" class="ghost-button danger-ghost-button site-rule-clear-button" data-site-rule-clear-field="variants">清除</button>
+                  </div>
+                </label>
+              </div>
+              <div class="site-rule-actions">
+                <button type="button" class="ghost-button emphasized" id="testSiteRuleButton">测试规则</button>
+                <button type="button" class="ghost-button" id="saveSiteRuleButton">保存当前选择</button>
+                <button type="button" class="ghost-button danger-ghost-button" id="clearSiteRuleButton">清除全部</button>
+              </div>
+              <section class="site-rule-test-panel" id="siteRuleTestPanel" hidden>
+                <div class="site-rule-test-header">
+                  <h3>测试返回</h3>
+                  <span id="siteRuleTestSummary">等待测试</span>
+                </div>
+                <ul id="siteRuleTestList"></ul>
+              </section>
+            </div>
+          </section>
+        </section>
+
+        <section class="tab-panel" data-tab-panel="validation" hidden>
+          <section class="validation-panel work-card" id="validationPanel" aria-live="polite" hidden>
+            <div class="validation-header work-card-header">
+              <div>
+                <p class="section-kicker">Preflight</p>
+                <h2>导出校验</h2>
+                <p class="section-subtitle">导出前集中查看必填字段、变体和图片风险。</p>
+              </div>
+              <span id="validationSummary">等待校验</span>
+            </div>
+            <ul id="validationList"></ul>
+          </section>
+          <section class="empty-validation-card work-card">
+            <div class="empty-illustration compact">
+              <img src="icons/sheep-logo.svg" alt="" />
+            </div>
+            <h2>校验结果会显示在这里</h2>
+            <p>点击“导出 CSV”“检查变体”或“检查图片”后，可以在这里处理风险。</p>
+          </section>
+        </section>
       </section>
 
-      <footer class="footer-note">
-        <span>当前批次支持单品编辑、多变体导出，以及 URL 队列多品采集。</span>
+      <footer class="bottom-action-bar glass-panel">
+        <div>
+          <span id="bottomModeLabel">商品编辑</span>
+          <small id="bottomValidationState">等待校验</small>
+        </div>
+        <button type="button" class="secondary-button" id="bottomResetButton">重置</button>
+        <button type="button" class="export-action" id="bottomExportCsvButton" disabled>导出 CSV</button>
       </footer>
     </main>
 

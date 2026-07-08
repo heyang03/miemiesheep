@@ -34,7 +34,10 @@ const batchSearchInput = document.getElementById("batchSearchInput");
 const batchEditPanel = document.getElementById("batchEditPanel");
 const batchEditSummary = document.getElementById("batchEditSummary");
 const batchVendorInput = document.getElementById("batchVendorInput");
+const batchTypeInput = document.getElementById("batchTypeInput");
 const batchTagsInput = document.getElementById("batchTagsInput");
+const batchStatusSelect = document.getElementById("batchStatusSelect");
+const batchPublishedSelect = document.getElementById("batchPublishedSelect");
 const applyBatchEditButton = document.getElementById("applyBatchEditButton");
 const batchReportPanel = document.getElementById("batchReportPanel");
 const batchReportSummary = document.getElementById("batchReportSummary");
@@ -127,6 +130,20 @@ const imageReplaceToInput = document.getElementById("imageReplaceToInput");
 const replaceImageDomainButton = document.getElementById("replaceImageDomainButton");
 const imageBody = document.getElementById("imageBody");
 const imageHeader = imageTitleToggle?.closest(".accordion-header");
+const headerDomainBadge = document.getElementById("headerDomainBadge");
+const siteTypeBadge = document.getElementById("siteTypeBadge");
+const workspaceTabButtons = Array.from(document.querySelectorAll("[data-workspace-tab]"));
+const workspaceTabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
+const summaryShortcutButtons = Array.from(document.querySelectorAll("[data-tab-shortcut]"));
+const summaryProductStatus = document.getElementById("summaryProductStatus");
+const summaryImageStatus = document.getElementById("summaryImageStatus");
+const summaryVariantStatus = document.getElementById("summaryVariantStatus");
+const summaryBatchStatus = document.getElementById("summaryBatchStatus");
+const summaryRiskStatus = document.getElementById("summaryRiskStatus");
+const bottomModeLabel = document.getElementById("bottomModeLabel");
+const bottomValidationState = document.getElementById("bottomValidationState");
+const bottomResetButton = document.getElementById("bottomResetButton");
+const bottomExportCsvButton = document.getElementById("bottomExportCsvButton");
 
 function addSafeEventListener(target, type, listener, options) {
   target?.addEventListener?.(type, listener, options);
@@ -135,6 +152,7 @@ function addSafeEventListener(target, type, listener, options) {
 const BATCH_STORAGE_KEY = "spc:batch-queue:v1";
 const COLLECTOR_SETTINGS_STORAGE_KEY = "spc:collector-settings:v1";
 const SITE_RULE_EXPAND_AFTER_PICK_KEY = "spc:ui:site-rule-expand-after-pick";
+const POPUP_UI_RETURN_STORAGE_PREFIX = "spc:ui:return:";
 const SITE_RULE_STORAGE_PREFIX = "spc:site-rule:";
 const BATCH_TAB_LOAD_TIMEOUT_MS = 35000;
 const MIN_BATCH_TIMEOUT_SECONDS = 8;
@@ -180,6 +198,163 @@ function setStatus(message, type = "idle") {
 
   if (statusDot) {
     statusDot.dataset.status = type;
+  }
+
+  if (bottomValidationState) {
+    bottomValidationState.textContent = message || "等待校验";
+  }
+}
+
+const WORKSPACE_TAB_LABELS = {
+  product: "商品编辑",
+  variants: "变体管理",
+  images: "图片管理",
+  batch: "批量采集",
+  tools: "规则与工具",
+  validation: "导出校验"
+};
+
+function activateWorkspaceTab(tabName = "product") {
+  const normalizedTab = WORKSPACE_TAB_LABELS[tabName] ? tabName : "product";
+
+  workspaceTabButtons.forEach((button) => {
+    const isActive = button.dataset.workspaceTab === normalizedTab;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+  });
+
+  summaryShortcutButtons.forEach((button) => {
+    const isActive = button.dataset.tabShortcut === normalizedTab;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  });
+
+  workspaceTabPanels.forEach((panel) => {
+    const isActive = panel.dataset.tabPanel === normalizedTab;
+    panel.hidden = !isActive;
+    panel.classList.toggle("is-active", isActive);
+  });
+
+  document.querySelector(".popup-shell")?.setAttribute("data-active-tab", normalizedTab);
+
+  if (bottomModeLabel) {
+    bottomModeLabel.textContent = WORKSPACE_TAB_LABELS[normalizedTab];
+  }
+}
+
+function getPopupShellElement() {
+  return document.querySelector(".popup-shell");
+}
+
+function getActiveWorkspaceTabName() {
+  return (
+    document.querySelector("[data-workspace-tab].is-active")?.dataset.workspaceTab ||
+    getPopupShellElement()?.dataset.activeTab ||
+    "product"
+  );
+}
+
+function getPopupUiReturnStorageKey(url = currentTabUrl) {
+  return `${POPUP_UI_RETURN_STORAGE_PREFIX}${hashString(normalizePageUrl(url || ""))}`;
+}
+
+function savePopupUiReturnState(tabName = getActiveWorkspaceTabName(), reason = "manual") {
+  if (!currentTabUrl) {
+    return Promise.resolve();
+  }
+
+  return chromeStorageSet({
+    [getPopupUiReturnStorageKey()]: {
+      tabName,
+      reason,
+      scrollTop: getPopupShellElement()?.scrollTop || 0,
+      imageGridScrollTop: imageGrid?.scrollTop || 0,
+      updatedAt: Date.now()
+    }
+  });
+}
+
+async function restorePopupUiReturnState() {
+  if (!currentTabUrl) {
+    return false;
+  }
+
+  const storageKey = getPopupUiReturnStorageKey();
+  const state = await chromeStorageGet(storageKey);
+
+  if (!state || !WORKSPACE_TAB_LABELS[state.tabName]) {
+    return false;
+  }
+
+  activateWorkspaceTab(state.tabName);
+  window.requestAnimationFrame(() => {
+    const scrollContainer = getPopupShellElement();
+
+    if (scrollContainer) {
+      scrollContainer.scrollTop = Math.min(
+        Number(state.scrollTop) || 0,
+        scrollContainer.scrollHeight
+      );
+    }
+
+    if (imageGrid) {
+      imageGrid.scrollTop = Math.min(
+        Number(state.imageGridScrollTop) || 0,
+        imageGrid.scrollHeight
+      );
+    }
+  });
+  await chromeStorageRemove(storageKey);
+  return true;
+}
+
+function getCurrentDraftValidationCounts() {
+  if (!currentProductDraft) {
+    return { errors: 0, warnings: 0 };
+  }
+
+  const validation = getExportValidation(currentProductDraft);
+
+  return {
+    errors: validation.errors.length,
+    warnings: validation.warnings.length
+  };
+}
+
+function updateWorkspaceSummary() {
+  const images = normalizeImages(currentProductDraft?.images || [], currentProductDraft?.title || "");
+  const variants = currentProductDraft
+    ? normalizeVariants(currentProductDraft, images).filter((variant) => !variant.excludedFromExport)
+    : [];
+  const allVariants = currentProductDraft ? normalizeVariants(currentProductDraft, images) : [];
+  const batchStats = getBatchStats();
+  const validationCounts = getCurrentDraftValidationCounts();
+  const riskCount = validationCounts.errors + validationCounts.warnings;
+
+  if (summaryProductStatus) {
+    summaryProductStatus.textContent = currentProductDraft?.title ? "已采集" : "未采集";
+  }
+
+  if (summaryImageStatus) {
+    summaryImageStatus.textContent = `${images.length} 张`;
+  }
+
+  if (summaryVariantStatus) {
+    summaryVariantStatus.textContent = `${variants.length}/${allVariants.length || 0}`;
+  }
+
+  if (summaryBatchStatus) {
+    summaryBatchStatus.textContent = `${batchStats.total} 个`;
+  }
+
+  if (summaryRiskStatus) {
+    summaryRiskStatus.textContent = riskCount
+      ? `${validationCounts.errors} 错误 / ${validationCounts.warnings} 风险`
+      : "0 风险";
+  }
+
+  if (bottomValidationState && !statusText?.textContent) {
+    bottomValidationState.textContent = riskCount ? summaryRiskStatus.textContent : "等待校验";
   }
 }
 
@@ -301,6 +476,15 @@ function renderPageInfo(pageInfo) {
     element.value = value;
     element.title = value;
   });
+
+  if (headerDomainBadge) {
+    headerDomainBadge.textContent = domain;
+    headerDomainBadge.title = domain;
+  }
+
+  if (!currentProductDraft) {
+    updateSiteTypeBadge();
+  }
 }
 
 function chromeStorageGet(key) {
@@ -1070,7 +1254,9 @@ function getBatchItemRisks(item) {
   const images = normalizeImages(product.images, product.title).filter((image) =>
     String(image.url || "").trim()
   );
-  const variants = normalizeVariants(product, images);
+  const variants = normalizeVariants(product, images).filter(
+    (variant) => !variant.excludedFromExport
+  );
   const hasPrice = variants.some((variant) =>
     String(variant.price || product.price || "").trim()
   );
@@ -1082,6 +1268,10 @@ function getBatchItemRisks(item) {
 
   if (!hasPrice) {
     risks.push({ type: "price", label: "无价格" });
+  }
+
+  if (hasDefaultTitleVariantWarning(variants)) {
+    risks.push({ type: "variants", label: "默认变体" });
   }
 
   return risks;
@@ -1287,7 +1477,13 @@ function renderBatchExportValidation(products = getBatchProducts()) {
 
 function updateBatchEditControls() {
   const targetItems = getSelectedSuccessfulBatchItems();
-  const hasEditValue = Boolean(batchVendorInput.value.trim() || batchTagsInput.value.trim());
+  const hasEditValue = Boolean(
+    batchVendorInput.value.trim() ||
+      batchTypeInput.value.trim() ||
+      batchTagsInput.value.trim() ||
+      batchStatusSelect.value ||
+      batchPublishedSelect.value
+  );
 
   batchEditSummary.textContent = targetItems.length
     ? `将应用到 ${targetItems.length} 个已选成功商品`
@@ -1302,15 +1498,18 @@ function applyBatchEditsToSelectedItems() {
 
   const targetItems = getSelectedSuccessfulBatchItems();
   const vendor = batchVendorInput.value.trim();
+  const type = batchTypeInput.value.trim();
   const tags = normalizeBatchTags(batchTagsInput.value);
+  const status = batchStatusSelect.value;
+  const published = batchPublishedSelect.value;
 
   if (!targetItems.length) {
     setStatus("请先选择已采集成功的商品", "error");
     return;
   }
 
-  if (!vendor && !tags) {
-    setStatus("请填写品牌/供应商或标签后再应用", "error");
+  if (!vendor && !type && !tags && !status && !published) {
+    setStatus("请填写品牌/供应商、商品类型、标签、状态或发布设置后再应用", "error");
     return;
   }
 
@@ -1318,7 +1517,10 @@ function applyBatchEditsToSelectedItems() {
     const product = normalizeDraft({
       ...item.product,
       vendor: vendor || item.product.vendor || "",
-      tags: tags || item.product.tags || ""
+      type: type || item.product.type || "",
+      tags: tags || item.product.tags || "",
+      status: status || item.product.status || "active",
+      published: published || item.product.published || "false"
     });
 
     updateBatchItemFromProduct(item, product);
@@ -1328,7 +1530,7 @@ function applyBatchEditsToSelectedItems() {
   saveBatchState();
   addBatchLog(
     "success",
-    `批量编辑已应用：${targetItems.length} 个商品${vendor ? "，品牌/供应商已更新" : ""}${tags ? "，标签已更新" : ""}`
+    `批量编辑已应用：${targetItems.length} 个商品${vendor ? "，品牌/供应商已更新" : ""}${type ? "，类型已更新" : ""}${tags ? "，标签已更新" : ""}${status ? "，状态已更新" : ""}${published ? "，发布设置已更新" : ""}`
   );
   setStatus(`已批量编辑 ${targetItems.length} 个商品`, "success");
 }
@@ -1454,6 +1656,7 @@ function updateBatchControls() {
   updateBatchEditControls();
   renderBatchReport();
   renderBatchExportValidation();
+  updateWorkspaceSummary();
 }
 
 function renderBatchQueue() {
@@ -2496,6 +2699,9 @@ async function resetAllState() {
   }
 
   resetAllButton.disabled = true;
+  if (bottomResetButton) {
+    bottomResetButton.disabled = true;
+  }
   setStatus("正在重置...", "loading");
 
   try {
@@ -2515,6 +2721,7 @@ async function resetAllState() {
     batchLogs = [];
     batchUrlInput.value = "";
     productPanel.hidden = true;
+    updateSiteTypeBadge();
     clearValidationResults();
     renderBatchQueue();
     updateExportAvailability();
@@ -2523,6 +2730,9 @@ async function resetAllState() {
     setStatus(error.message || "重置失败", "error");
   } finally {
     resetAllButton.disabled = false;
+    if (bottomResetButton) {
+      bottomResetButton.disabled = false;
+    }
   }
 }
 
@@ -2671,6 +2881,10 @@ function handleBatchListKeydown(event) {
 
 function updateExportAvailability() {
   exportCsvButton.disabled = !currentProductDraft;
+  if (bottomExportCsvButton) {
+    bottomExportCsvButton.disabled = !currentProductDraft;
+  }
+  updateWorkspaceSummary();
 }
 
 function sendMessageToTab(tabId, message) {
@@ -2712,6 +2926,7 @@ function clearValidationResults() {
   validationSummary.textContent = "等待校验";
   clearElement(validationList);
   clearVariantValidationMarks();
+  updateWorkspaceSummary();
 }
 
 function setInputValue(input, value) {
@@ -2746,6 +2961,51 @@ function getSourceLabel(source) {
   };
 
   return labels[source] || "Unknown";
+}
+
+function getSiteTypeLabel(source) {
+  const normalizedSource = String(source || "").toLowerCase();
+
+  if (normalizedSource.includes("shopify")) {
+    return "Shopify";
+  }
+
+  if (normalizedSource.includes("woocommerce")) {
+    return "WooCommerce";
+  }
+
+  if (normalizedSource.includes("amazon")) {
+    return "Amazon";
+  }
+
+  if (normalizedSource.includes("shopline")) {
+    return "Shopline";
+  }
+
+  if (normalizedSource.includes("shoplazza")) {
+    return "Shoplazza";
+  }
+
+  if (normalizedSource === "custom-rule" || normalizedSource === "site-rule") {
+    return "站点规则";
+  }
+
+  if (normalizedSource) {
+    return "通用页面";
+  }
+
+  return "未识别";
+}
+
+function updateSiteTypeBadge(source = "") {
+  if (!siteTypeBadge) {
+    return;
+  }
+
+  const label = getSiteTypeLabel(source);
+  siteTypeBadge.textContent = label;
+  siteTypeBadge.title = `本次采集站点类型：${label}`;
+  siteTypeBadge.dataset.siteType = String(source || "unknown").toLowerCase();
 }
 
 function getProductDomain(product = currentProductDraft) {
@@ -3366,11 +3626,26 @@ function updateImagePreviewSource(preview, url, altText = "商品图片") {
   let sourceElement;
 
   if (normalizedUrl) {
+    preview.classList.add("has-image-preview");
+    preview.style.backgroundImage = "";
+    preview.style.backgroundPosition = "";
+    preview.style.backgroundRepeat = "";
+    preview.style.backgroundSize = "";
+
     sourceElement = document.createElement("img");
     sourceElement.src = normalizedUrl;
     sourceElement.alt = altText || "商品图片";
     sourceElement.loading = "lazy";
+    sourceElement.decoding = "async";
+    sourceElement.setAttribute("aria-hidden", "true");
+    sourceElement.tabIndex = -1;
   } else {
+    preview.classList.remove("has-image-preview");
+    preview.style.backgroundImage = "";
+    preview.style.backgroundPosition = "";
+    preview.style.backgroundRepeat = "";
+    preview.style.backgroundSize = "";
+
     sourceElement = document.createElement("div");
     sourceElement.className = "image-placeholder";
     sourceElement.textContent = "待输入";
@@ -3540,8 +3815,8 @@ function openImageLightboxAt(index = 0) {
 
   overlay.__spcOnKeyDown = onKeyDown;
   document.addEventListener("keydown", onKeyDown);
-  toolbar.append(previousButton, nextButton, deleteButton, openLink);
-  frame.append(image, caption, toolbar, closeButton);
+  toolbar.append(previousButton, nextButton, openLink, deleteButton, closeButton);
+  frame.append(image, caption, toolbar);
   overlay.append(frame);
   document.body.appendChild(overlay);
   overlay.focus({ preventScroll: true });
@@ -4746,6 +5021,60 @@ function parseStrictPriceNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function normalizeDefaultTitleText(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isDefaultTitleText(value) {
+  return normalizeDefaultTitleText(value) === "default title";
+}
+
+function isShopifyDefaultOptionName(value) {
+  const text = normalizeDefaultTitleText(value);
+
+  return text === "default title" || text === "title";
+}
+
+function getDefaultTitleVariantWarning(variant, exportableCount = 1) {
+  const option1Name = String(variant?.option1Name || "").trim();
+  const option1Value = String(variant?.option1Value || "").trim();
+  const option2Name = String(variant?.option2Name || "").trim();
+  const option2Value = String(variant?.option2Value || "").trim();
+  const option3Name = String(variant?.option3Name || "").trim();
+  const option3Value = String(variant?.option3Value || "").trim();
+  const hasDefaultTitle = [
+    option1Name,
+    option1Value,
+    option2Name,
+    option2Value,
+    option3Name,
+    option3Value
+  ].some(isDefaultTitleText);
+
+  if (!hasDefaultTitle) {
+    return "";
+  }
+
+  const isSingleDefaultVariant =
+    exportableCount <= 1 &&
+    isShopifyDefaultOptionName(option1Name) &&
+    isDefaultTitleText(option1Value) &&
+    !option2Name &&
+    !option2Value &&
+    !option3Name &&
+    !option3Value;
+
+  if (isSingleDefaultVariant) {
+    return "变体使用 Shopify 默认占位值 Default Title，将按单规格商品导出；如果页面实际有颜色、尺码或容量，请先补充真实变体。";
+  }
+
+  return "变体包含 Default Title 默认占位值，请确认是否漏采真实规格，或改成实际颜色、尺码、容量。";
+}
+
+function hasDefaultTitleVariantWarning(variants = []) {
+  return variants.some((variant) => getDefaultTitleVariantWarning(variant, variants.length));
+}
+
 function addValidationIssue(target, field, message, options = {}) {
   target.push({
     field,
@@ -4934,6 +5263,17 @@ function getExportValidation(product) {
       );
     }
 
+    const defaultTitleWarning = getDefaultTitleVariantWarning(
+      variant,
+      variantEntries.length
+    );
+
+    if (defaultTitleWarning) {
+      addValidationIssue(warnings, "variants", `${prefix}：${defaultTitleWarning}`, {
+        variantIndex: index
+      });
+    }
+
     if (!sku && variantEntries.length > 1) {
       addValidationIssue(warnings, "variants", `${prefix} SKU 为空，建议使用“补齐 SKU”。`, {
         variantIndex: index
@@ -5104,12 +5444,17 @@ function getExportValidation(product) {
 function renderValidationResults(result) {
   const totalIssues = result.errors.length + result.warnings.length;
 
+  activateWorkspaceTab("validation");
   validationPanel.hidden = false;
   clearElement(validationList);
   applyVariantValidationMarks(result);
+  updateWorkspaceSummary();
 
   if (!totalIssues) {
     validationSummary.textContent = "校验通过";
+    if (bottomValidationState) {
+      bottomValidationState.textContent = "校验通过";
+    }
 
     const item = document.createElement("li");
     item.className = "validation-item";
@@ -5120,6 +5465,9 @@ function renderValidationResults(result) {
   }
 
   validationSummary.textContent = `${result.errors.length} 错误 / ${result.warnings.length} 风险`;
+  if (bottomValidationState) {
+    bottomValidationState.textContent = validationSummary.textContent;
+  }
 
   [
     ...result.errors.map((issue) => ({ ...issue, level: "error" })),
@@ -5342,9 +5690,6 @@ function renderImages(images) {
     });
     updateImagePreviewSource(preview, image.url, image.altText || "商品图片");
 
-    const caption = document.createElement("figcaption");
-    caption.textContent = index === 0 ? `#${image.position} 主图` : `#${image.position}`;
-
     const selectLabel = document.createElement("label");
     const selectCheckbox = document.createElement("input");
     selectLabel.className = "image-select-control";
@@ -5357,6 +5702,14 @@ function renderImages(images) {
       updateImageSelectionToolbar();
     });
     selectLabel.append(selectCheckbox);
+
+    const viewButton = document.createElement("button");
+    viewButton.type = "button";
+    viewButton.className = "image-view-button";
+    viewButton.textContent = "查看大图";
+    viewButton.addEventListener("click", () => {
+      openImageLightboxAt(index);
+    });
 
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
@@ -5399,11 +5752,21 @@ function renderImages(images) {
       setMainImage(index);
     });
 
-    preview.append(caption, selectLabel, deleteButton, mainButton);
+    const imageActions = document.createElement("div");
+    imageActions.className = "image-card-actions";
+    imageActions.append(viewButton, mainButton, deleteButton);
+
+    preview.append(selectLabel);
 
     const urlInput = document.createElement("input");
     const altInput = document.createElement("input");
     const checkStatus = document.createElement("span");
+    const imageMeta = document.createElement("div");
+    const imagePositionBadge = document.createElement("span");
+    const imageAltPreview = document.createElement("strong");
+    const imageUrlPreview = document.createElement("span");
+    const imageFields = document.createElement("details");
+    const imageFieldsSummary = document.createElement("summary");
     urlInput.className = "image-url-input";
     urlInput.type = "url";
     urlInput.value = image.url;
@@ -5414,6 +5777,17 @@ function renderImages(images) {
     altInput.placeholder = "图片 Alt text";
     checkStatus.className = "image-check-status";
     renderImageCheckStatus(checkStatus, image.check);
+    imageMeta.className = "image-card-meta";
+    imagePositionBadge.className = "image-position-badge";
+    imagePositionBadge.textContent = index === 0 ? `#${image.position} 主图` : `#${image.position}`;
+    imageAltPreview.className = "image-alt-title";
+    imageAltPreview.textContent = image.altText || currentProductDraft?.title || "未填写 Alt";
+    imageUrlPreview.className = "image-url-preview";
+    imageUrlPreview.textContent = image.url || "未填写 URL";
+    imageUrlPreview.title = image.url || "";
+    imageMeta.append(imagePositionBadge, imageAltPreview, imageUrlPreview);
+    imageFields.className = "image-fields";
+    imageFieldsSummary.textContent = "编辑信息";
     urlInput.addEventListener("input", () => {
       clearValidationResults();
       markImagesUserEdited();
@@ -5433,6 +5807,8 @@ function renderImages(images) {
         currentProductDraft.images[index].url,
         currentProductDraft.images[index].altText || currentProductDraft.title || "商品图片"
       );
+      imageUrlPreview.textContent = currentProductDraft.images[index].url || "未填写 URL";
+      imageUrlPreview.title = currentProductDraft.images[index].url || "";
       updateImageCheckToolbar();
       queueSaveDraft();
     });
@@ -5448,15 +5824,18 @@ function renderImages(images) {
       }
 
       currentProductDraft.images[index].altText = altInput.value.trim();
+      imageAltPreview.textContent = currentProductDraft.images[index].altText || currentProductDraft.title || "未填写 Alt";
       queueSaveDraft();
     });
 
-    item.append(preview, urlInput, altInput, checkStatus);
+    imageFields.append(imageFieldsSummary, urlInput, altInput);
+    item.append(preview, imageMeta, imageActions, imageFields, checkStatus);
     imageGrid.appendChild(item);
   });
 
   updateImageSelectionToolbar();
   updateImageCheckToolbar();
+  updateWorkspaceSummary();
 }
 
 function addManualImage() {
@@ -5479,6 +5858,7 @@ function addManualImage() {
   queueSaveDraft("已添加图片输入框");
 
   const imageInputs = imageGrid.querySelectorAll(".image-url-input");
+  imageInputs[imageInputs.length - 1]?.closest("details")?.setAttribute("open", "");
   imageInputs[imageInputs.length - 1]?.focus();
 }
 
@@ -5506,6 +5886,32 @@ function createVariantInput(field, labelText, value, options = {}) {
 
   label.append(span, input);
   return label;
+}
+
+function createVariantMetaPill(labelText, value) {
+  const pill = document.createElement("div");
+  const label = document.createElement("span");
+  const content = document.createElement("strong");
+
+  pill.className = "variant-meta-pill";
+  label.textContent = labelText;
+  content.textContent = value || "未填写";
+  content.title = value || "未填写";
+  pill.append(label, content);
+
+  return pill;
+}
+
+function getVariantDisplayName(variant, index) {
+  const values = [
+    [variant.option1Name, variant.option1Value],
+    [variant.option2Name, variant.option2Value],
+    [variant.option3Name, variant.option3Value]
+  ]
+    .filter(([, value]) => String(value || "").trim())
+    .map(([name, value]) => `${String(name || "Option").trim()}: ${String(value || "").trim()}`);
+
+  return values.join(" / ") || `变体 #${index + 1}`;
 }
 
 function renderVariants(variants) {
@@ -5560,7 +5966,7 @@ function renderVariants(variants) {
       item.classList.toggle("is-selected", selectCheckbox.checked);
       updateVariantSelectionToolbar();
     });
-    title.textContent = `变体 #${index + 1}`;
+    title.textContent = getVariantDisplayName(variant, index);
     exportBadge.className = "variant-export-badge";
     exportBadge.dataset.exportExcluded = String(Boolean(variant.excludedFromExport));
     exportBadge.textContent = variant.excludedFromExport ? "不导出" : "导出";
@@ -5581,6 +5987,20 @@ function renderVariants(variants) {
       renderVariants(currentProductDraft.variants);
       queueSaveDraft("变体已删除并保存");
     });
+
+    const compactMeta = document.createElement("div");
+    const details = document.createElement("details");
+    const detailsSummary = document.createElement("summary");
+
+    compactMeta.className = "variant-compact-meta";
+    compactMeta.append(
+      createVariantMetaPill("SKU", variant.sku),
+      createVariantMetaPill("价格", variant.price),
+      createVariantMetaPill("Barcode", variant.barcode)
+    );
+
+    details.className = "variant-details";
+    detailsSummary.textContent = "编辑完整字段";
 
     fields.className = "variant-fields";
     fields.append(
@@ -5620,9 +6040,10 @@ function renderVariants(variants) {
         placeholder: "可选，默认使用商品主图"
       })
     );
+    details.append(detailsSummary, fields);
 
     header.append(titleWrap, deleteButton);
-    item.append(header, fields);
+    item.append(header, compactMeta, details);
     variantList.appendChild(item);
 
     if (matchesSearch) {
@@ -5644,6 +6065,7 @@ function renderVariants(variants) {
   updateVariantSelectionToolbar();
   updateVariantDuplicateToolbar(normalizedVariants);
   updateVariantSkuToolbar(normalizedVariants);
+  updateWorkspaceSummary();
 }
 
 function addVariant() {
@@ -5711,12 +6133,15 @@ function renderProduct(product, options = {}) {
   setInputValue(productDescriptionInput, currentProductDraft.description);
 
   sourceBadge.textContent = getSourceLabel(currentProductDraft.source);
+  updateSiteTypeBadge(currentProductDraft.source);
   renderVariants(currentProductDraft.variants);
   renderImages(currentProductDraft.images);
   imageSourceInfo.textContent = getImageModeLabel(currentProductDraft);
   cacheHint.textContent = options.fromCache
     ? "已从缓存恢复，修改会自动保存"
     : "采集结果已缓存，修改会自动保存";
+  updateWorkspaceSummary();
+  activateWorkspaceTab("product");
 }
 
 function getProductStatusMessage(product) {
@@ -5841,6 +6266,7 @@ async function startImageAreaPicker() {
   setStatus("请在页面上点击商品图片区域，选择后重新打开插件采集", "loading");
 
   try {
+    await savePopupUiReturnState("images", "image-picker");
     const tab = await getCurrentTab();
 
     if (!tab || !tab.id) {
@@ -5987,6 +6413,7 @@ function bindDraftInputs() {
     await chromeStorageRemove(currentDraftKey);
     currentProductDraft = null;
     productPanel.hidden = true;
+    updateSiteTypeBadge();
     clearValidationResults();
     updateExportAvailability();
     setStatus("当前页面缓存草稿已清空", "idle");
@@ -6052,6 +6479,7 @@ async function initializePopup() {
       renderProduct(cachedDraft.draft, { fromCache: true });
       await refreshImagePickerStatus(tab.id);
       setStatus("已恢复当前页面缓存草稿", "success");
+      await restorePopupUiReturnState();
       return;
     }
 
@@ -6060,6 +6488,7 @@ async function initializePopup() {
     if (currentTabUrl) {
       setStatus("已识别当前标签页，可采集商品信息", "idle");
     }
+    await restorePopupUiReturnState();
   } catch (error) {
     setStatus("无法读取当前标签页", "error");
   }
@@ -6067,9 +6496,21 @@ async function initializePopup() {
 
 bindButtonFeedback();
 bindDraftInputs();
+workspaceTabButtons.forEach((button) => {
+  addSafeEventListener(button, "click", () => {
+    activateWorkspaceTab(button.dataset.workspaceTab);
+  });
+});
+summaryShortcutButtons.forEach((button) => {
+  addSafeEventListener(button, "click", () => {
+    activateWorkspaceTab(button.dataset.tabShortcut);
+  });
+});
 addSafeEventListener(collectButton, "click", collectCurrentProduct);
 addSafeEventListener(exportCsvButton, "click", exportCurrentProductCsv);
 addSafeEventListener(resetAllButton, "click", resetAllState);
+addSafeEventListener(bottomExportCsvButton, "click", exportCurrentProductCsv);
+addSafeEventListener(bottomResetButton, "click", resetAllState);
 addSafeEventListener(testSiteRuleButton, "click", testSiteRule);
 addSafeEventListener(saveSiteRuleButton, "click", saveSiteRule);
 addSafeEventListener(clearSiteRuleButton, "click", clearSiteRule);
@@ -6105,7 +6546,10 @@ addSafeEventListener(batchTimeoutInput, "change", () => {
 addSafeEventListener(amazonVariantPaginationInput, "change", saveCollectorSettingsFromForm);
 addSafeEventListener(batchSearchInput, "input", renderBatchQueue);
 addSafeEventListener(batchVendorInput, "input", updateBatchEditControls);
+addSafeEventListener(batchTypeInput, "input", updateBatchEditControls);
 addSafeEventListener(batchTagsInput, "input", updateBatchEditControls);
+addSafeEventListener(batchStatusSelect, "change", updateBatchEditControls);
+addSafeEventListener(batchPublishedSelect, "change", updateBatchEditControls);
 addSafeEventListener(applyBatchEditButton, "click", applyBatchEditsToSelectedItems);
 addSafeEventListener(batchList, "click", handleBatchListClick);
 addSafeEventListener(batchList, "change", handleBatchListChange);

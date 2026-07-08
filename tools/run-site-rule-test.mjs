@@ -20,6 +20,25 @@ function assert(condition, message) {
   }
 }
 
+async function launchBrowser() {
+  const launchCandidates = [
+    { headless: true },
+    { channel: "chrome", headless: true },
+    { channel: "msedge", headless: true }
+  ];
+  let lastError;
+
+  for (const options of launchCandidates) {
+    try {
+      return await chromium.launch(options);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError;
+}
+
 const html = String.raw`<!doctype html>
 <html>
   <head>
@@ -67,7 +86,7 @@ async function sendSpcMessage(page, message) {
 
 async function run() {
   let browser;
-  browser = await chromium.launch({ headless: true });
+  browser = await launchBrowser();
 
   try {
     const page = await browser.newPage();
@@ -90,7 +109,7 @@ async function run() {
           [key]: structuredClone(rule)
         };
 
-        window.chrome = {
+        const chromeMock = {
           runtime: {
             onMessage: {
               addListener(listener) {
@@ -121,6 +140,15 @@ async function run() {
             }
           }
         };
+
+        try {
+          Object.defineProperty(window, "chrome", {
+            configurable: true,
+            value: chromeMock
+          });
+        } catch (error) {
+          Object.assign(window.chrome, chromeMock);
+        }
       },
       { storageKey, siteRule }
     );
