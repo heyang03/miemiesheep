@@ -6277,6 +6277,92 @@
     return shopify.source === "shopify-api" && getPlatformProductSignals(shopify) > 0;
   }
 
+  function getNonEmptyProductEntries(product = {}) {
+    return Object.entries(product).filter(([, value]) =>
+      Array.isArray(value) ? value.length : Boolean(value)
+    );
+  }
+
+  function mergeNonEmptyProductData(base = {}, override = {}) {
+    return {
+      ...base,
+      ...Object.fromEntries(getNonEmptyProductEntries(override))
+    };
+  }
+
+  function getProductVariants(product = {}) {
+    return Array.isArray(product.variants) ? product.variants : [];
+  }
+
+  function hasProductPriceSignal(product = {}) {
+    return Boolean(
+      cleanText(product.price) ||
+        getProductVariants(product).some((variant) => cleanText(variant?.price))
+    );
+  }
+
+  function hasProductImageSignal(product = {}) {
+    return Array.isArray(product.images) && product.images.length > 0;
+  }
+
+  function hasProductCoreSignals(product = {}) {
+    return Boolean(
+      cleanText(product.title) &&
+        hasProductPriceSignal(product) &&
+        hasProductImageSignal(product)
+    );
+  }
+
+  function hasTrustedVariantSource(...sources) {
+    const trustedSources = new Set([
+      "amazon",
+      "custom-rule",
+      "shopify",
+      "shopify-api",
+      "shopline",
+      "shoplazza",
+      "site-rule",
+      "woocommerce"
+    ]);
+
+    return sources.some((source) => {
+      const variants = getProductVariants(source);
+
+      if (!variants.length) {
+        return false;
+      }
+
+      if (trustedSources.has(source?.source)) {
+        return true;
+      }
+
+      return !isDefaultOnlyVariantList(variants);
+    });
+  }
+
+  function shouldRunProductFallback(product, sources = []) {
+    return !hasProductCoreSignals(product) || !hasTrustedVariantSource(...sources);
+  }
+
+  function applyManualImageSelection(dom = {}, storedImageSelector, manualImageInfo) {
+    if (!storedImageSelector) {
+      return dom;
+    }
+
+    const manualImages = manualImageInfo?.urls || [];
+
+    return {
+      ...dom,
+      imageSourceSelector: storedImageSelector,
+      imageCollectionMode: "manual",
+      manualImageCount: manualImageInfo?.urlCount || 0,
+      manualImageNodeCount: manualImageInfo?.nodeCount || 0,
+      images: manualImages,
+      imagePriority: "manual",
+      ...(manualImages.length ? { source: "manual" } : {})
+    };
+  }
+
   function pickProductField(sources, field) {
     for (const source of sources) {
       const value = source?.[field];
@@ -6465,35 +6551,36 @@
     const jsonLd = collectJsonLdProduct();
     const shopify = await collectShopifyProduct();
     const meta = collectMetaProduct();
-    const storedSiteRule = await readStoredSiteRule();
+    const [storedSiteRule, storedImageSelector] = await Promise.all([
+      readStoredSiteRule(),
+      readStoredImageSelector()
+    ]);
     const siteRule = collectSiteRuleProduct(storedSiteRule, "custom-rule");
-    const storedImageSelector = await readStoredImageSelector();
     const manualImageInfo = inspectImagesFromSelector(storedImageSelector);
-    const manualImages = manualImageInfo.urls;
-    const platform = await collectPlatformProduct(collectorOptions);
-    const dom = {
-      ...collectDomProduct(),
-      ...Object.fromEntries(
-        Object.entries(platform).filter(([, value]) =>
-          Array.isArray(value) ? value.length : Boolean(value)
-        )
-      )
-    };
+    let platform = {};
+    let dom = applyManualImageSelection({}, storedImageSelector, manualImageInfo);
+    let product = mergeProductData(jsonLd, meta, dom, shopify, siteRule);
 
-    if (storedImageSelector) {
-      dom.imageSourceSelector = storedImageSelector;
-      dom.imageCollectionMode = "manual";
-      dom.manualImageCount = manualImageInfo.urlCount;
-      dom.manualImageNodeCount = manualImageInfo.nodeCount;
-      dom.images = manualImages;
-      dom.imagePriority = "manual";
-
-      if (manualImages.length) {
-        dom.source = "manual";
-      }
+    if (shouldRunProductFallback(product, [siteRule, shopify, jsonLd, dom])) {
+      platform = await collectPlatformProduct(collectorOptions);
+      dom = applyManualImageSelection(
+        mergeNonEmptyProductData(dom, platform),
+        storedImageSelector,
+        manualImageInfo
+      );
+      product = mergeProductData(jsonLd, meta, dom, shopify, siteRule);
     }
 
-    return mergeProductData(jsonLd, meta, dom, shopify, siteRule);
+    if (shouldRunProductFallback(product, [siteRule, shopify, jsonLd, platform, dom])) {
+      dom = applyManualImageSelection(
+        mergeNonEmptyProductData(collectDomProduct(), platform),
+        storedImageSelector,
+        manualImageInfo
+      );
+      product = mergeProductData(jsonLd, meta, dom, shopify, siteRule);
+    }
+
+    return product;
   }
 
   function collectProductPreview() {
