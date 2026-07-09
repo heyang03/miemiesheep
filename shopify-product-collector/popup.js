@@ -3610,6 +3610,16 @@ function clearElement(element) {
   }
 }
 
+function getEventTargetElement(event) {
+  return event.target instanceof Element ? event.target : null;
+}
+
+function closestWithin(event, selector, root) {
+  const element = getEventTargetElement(event)?.closest(selector);
+
+  return element && root?.contains(element) ? element : null;
+}
+
 function closeOpenCompactMenus(exceptMenu = null) {
   document.querySelectorAll(".compact-menu[open], .more-actions[open]").forEach((menu) => {
     if (menu !== exceptMenu) {
@@ -5292,25 +5302,220 @@ function setMainImage(index) {
   moveImage(index, 0, "主图已更新");
 }
 
+function deleteImageAtIndex(index) {
+  if (!currentProductDraft || !Number.isInteger(index) || index < 0) {
+    return;
+  }
+
+  const scrollContainer = document.querySelector(".popup-shell");
+  const previousScrollTop = scrollContainer?.scrollTop || 0;
+
+  clearValidationResults();
+  updateDraftFromForm();
+  markImagesUserEdited();
+  currentProductDraft.images.splice(index, 1);
+  currentProductDraft.images = normalizeImages(
+    currentProductDraft.images,
+    currentProductDraft.title
+  );
+  renderImages(currentProductDraft.images);
+  window.requestAnimationFrame(() => {
+    if (scrollContainer) {
+      scrollContainer.scrollTop = Math.min(
+        previousScrollTop,
+        scrollContainer.scrollHeight
+      );
+    }
+
+    const nextInputs = imageGrid.querySelectorAll(".image-url-input");
+    const nextInput = nextInputs[Math.min(index, nextInputs.length - 1)];
+    nextInput?.focus({ preventScroll: true });
+  });
+  queueSaveDraft("图片已删除并保存");
+}
+
+function getImageItemFromEvent(event) {
+  return closestWithin(event, ".image-item", imageGrid);
+}
+
+function getImageIndexFromItem(item) {
+  const index = Number(item?.dataset.imageIndex);
+
+  return Number.isInteger(index) && index >= 0 ? index : -1;
+}
+
+function ensureDraftImageAtIndex(index) {
+  if (!currentProductDraft.images[index]) {
+    currentProductDraft.images[index] = {
+      url: "",
+      position: index + 1,
+      altText: currentProductDraft.title || ""
+    };
+  }
+
+  return currentProductDraft.images[index];
+}
+
+function handleImageGridClick(event) {
+  const target = getEventTargetElement(event);
+  const item = getImageItemFromEvent(event);
+
+  if (!target || !item) {
+    return;
+  }
+
+  const index = getImageIndexFromItem(item);
+
+  if (index < 0) {
+    return;
+  }
+
+  if (target.closest(".image-view-button")) {
+    openImageLightboxAt(index);
+    return;
+  }
+
+  if (target.closest(".image-delete-button")) {
+    deleteImageAtIndex(index);
+    return;
+  }
+
+  if (target.closest(".image-main-button")) {
+    setMainImage(index);
+    return;
+  }
+
+  if (!target.closest(".image-preview")) {
+    return;
+  }
+
+  if (target.closest("button, label, input, a, summary")) {
+    return;
+  }
+
+  openImageLightboxAt(index);
+}
+
+function handleImageGridKeydown(event) {
+  if (event.key !== "Enter" && event.key !== " ") {
+    return;
+  }
+
+  const preview = closestWithin(event, ".image-preview", imageGrid);
+  const item = preview?.closest(".image-item");
+  const index = getImageIndexFromItem(item);
+
+  if (index < 0) {
+    return;
+  }
+
+  event.preventDefault();
+  openImageLightboxAt(index);
+}
+
+function handleImageGridChange(event) {
+  const checkbox = closestWithin(event, ".image-select-checkbox", imageGrid);
+
+  if (!checkbox) {
+    return;
+  }
+
+  checkbox.closest(".image-item")?.classList.toggle("is-selected", checkbox.checked);
+  updateImageSelectionToolbar();
+}
+
+function handleImageGridInput(event) {
+  const input = getEventTargetElement(event);
+
+  if (
+    !currentProductDraft ||
+    !input ||
+    (!input.matches(".image-url-input") && !input.matches(".image-alt-input"))
+  ) {
+    return;
+  }
+
+  const item = input.closest(".image-item");
+  const index = getImageIndexFromItem(item);
+
+  if (index < 0) {
+    return;
+  }
+
+  clearValidationResults();
+  markImagesUserEdited();
+
+  const image = ensureDraftImageAtIndex(index);
+  const preview = item.querySelector(".image-preview");
+  const checkStatus = item.querySelector(".image-check-status");
+  const imageAltPreview = item.querySelector(".image-alt-title");
+  const imageUrlPreview = item.querySelector(".image-url-preview");
+
+  if (input.matches(".image-url-input")) {
+    image.url = input.value.trim();
+    image.check = null;
+    renderImageCheckStatus(checkStatus, null);
+    updateImagePreviewSource(
+      preview,
+      image.url,
+      image.altText || currentProductDraft.title || "商品图片"
+    );
+    imageUrlPreview.textContent = image.url || "未填写 URL";
+    imageUrlPreview.title = image.url || "";
+    updateImageCheckToolbar();
+  } else {
+    image.altText = input.value.trim();
+    imageAltPreview.textContent = image.altText || currentProductDraft.title || "未填写 Alt";
+  }
+
+  queueSaveDraft();
+}
+
 function handleImageDragStart(event) {
-  const item = event.currentTarget;
+  const item = getImageItemFromEvent(event);
+
+  if (!item) {
+    return;
+  }
+
   draggedImageIndex = Number(item.dataset.imageIndex);
+
+  if (!Number.isInteger(draggedImageIndex)) {
+    return;
+  }
+
   item.classList.add("is-dragging");
-  event.dataTransfer.effectAllowed = "move";
-  event.dataTransfer.setData("text/plain", String(draggedImageIndex));
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(draggedImageIndex));
+  }
 }
 
 function handleImageDragOver(event) {
+  const item = getImageItemFromEvent(event);
+
+  if (!item) {
+    return;
+  }
+
   event.preventDefault();
-  event.currentTarget.classList.add("is-drag-over");
-  event.dataTransfer.dropEffect = "move";
+  item.classList.add("is-drag-over");
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = "move";
+  }
 }
 
 function handleImageDrop(event) {
-  event.preventDefault();
-  const targetIndex = Number(event.currentTarget.dataset.imageIndex);
+  const item = getImageItemFromEvent(event);
 
-  event.currentTarget.classList.remove("is-drag-over");
+  if (!item) {
+    return;
+  }
+
+  event.preventDefault();
+  const targetIndex = Number(item.dataset.imageIndex);
+
+  item.classList.remove("is-drag-over");
 
   if (Number.isInteger(draggedImageIndex) && Number.isInteger(targetIndex)) {
     moveImage(draggedImageIndex, targetIndex);
@@ -5322,6 +5527,60 @@ function handleImageDragEnd() {
   imageGrid
     .querySelectorAll(".image-item")
     .forEach((item) => item.classList.remove("is-dragging", "is-drag-over"));
+}
+
+function deleteVariantAtIndex(index) {
+  if (!currentProductDraft || !Number.isInteger(index) || index < 0) {
+    return;
+  }
+
+  if (normalizeVariants(currentProductDraft).length <= 1) {
+    return;
+  }
+
+  clearValidationResults();
+  updateDraftFromForm();
+  currentProductDraft.variants.splice(index, 1);
+  currentProductDraft.variants = normalizeVariants(currentProductDraft);
+  renderVariants(currentProductDraft.variants);
+  queueSaveDraft("变体已删除并保存");
+}
+
+function handleVariantListClick(event) {
+  const deleteButton = closestWithin(event, ".variant-delete-button", variantList);
+  const item = deleteButton?.closest(".variant-item");
+  const index = Number(item?.dataset.variantIndex);
+
+  if (!deleteButton || !Number.isInteger(index)) {
+    return;
+  }
+
+  deleteVariantAtIndex(index);
+}
+
+function handleVariantListChange(event) {
+  const checkbox = closestWithin(event, ".variant-select-checkbox", variantList);
+
+  if (!checkbox) {
+    return;
+  }
+
+  checkbox.closest(".variant-item")?.classList.toggle("is-selected", checkbox.checked);
+  updateVariantSelectionToolbar();
+}
+
+function handleVariantListInput(event) {
+  const input = getEventTargetElement(event);
+
+  if (!input?.matches("[data-variant-field]")) {
+    return;
+  }
+
+  clearValidationResults();
+  updateDraftFromForm();
+  updateVariantDuplicateToolbar();
+  updateVariantSkuToolbar();
+  queueSaveDraft();
 }
 
 function getVariantField(variant, field, fallback = "") {
@@ -6531,36 +6790,19 @@ function renderImages(images) {
     return;
   }
 
+  const fragment = document.createDocumentFragment();
+
   visibleImages.forEach(({ image, index }) => {
     const item = document.createElement("figure");
     item.className = "image-item";
     item.dataset.imageIndex = String(index);
     item.draggable = true;
-    item.addEventListener("dragstart", handleImageDragStart);
-    item.addEventListener("dragover", handleImageDragOver);
-    item.addEventListener("drop", handleImageDrop);
-    item.addEventListener("dragend", handleImageDragEnd);
 
     const preview = document.createElement("div");
     preview.className = "image-preview";
     preview.tabIndex = 0;
     preview.setAttribute("role", "button");
     preview.setAttribute("aria-label", `Preview image ${image.position}`);
-    preview.addEventListener("click", (event) => {
-      if (event.target.closest("button, label, input, a")) {
-        return;
-      }
-
-      openImageLightboxAt(index);
-    });
-    preview.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") {
-        return;
-      }
-
-      event.preventDefault();
-      openImageLightboxAt(index);
-    });
     updateImagePreviewSource(preview, image.url, image.altText || "商品图片");
 
     const selectLabel = document.createElement("label");
@@ -6570,60 +6812,23 @@ function renderImages(images) {
     selectCheckbox.className = "image-select-checkbox";
     selectCheckbox.dataset.index = String(index);
     selectCheckbox.setAttribute("aria-label", `选择第 ${image.position} 张图片`);
-    selectCheckbox.addEventListener("change", () => {
-      item.classList.toggle("is-selected", selectCheckbox.checked);
-      updateImageSelectionToolbar();
-    });
     selectLabel.append(selectCheckbox);
 
     const viewButton = document.createElement("button");
     viewButton.type = "button";
     viewButton.className = "image-view-button";
     viewButton.textContent = "查看大图";
-    viewButton.addEventListener("click", () => {
-      openImageLightboxAt(index);
-    });
 
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
     deleteButton.className = "image-delete-button";
     deleteButton.textContent = "删除";
-    deleteButton.addEventListener("click", () => {
-      const scrollContainer = document.querySelector(".popup-shell");
-      const previousScrollTop = scrollContainer?.scrollTop || 0;
-
-      clearValidationResults();
-      updateDraftFromForm();
-      markImagesUserEdited();
-      currentProductDraft.images.splice(index, 1);
-      currentProductDraft.images = normalizeImages(
-        currentProductDraft.images,
-        currentProductDraft.title
-      );
-      renderImages(currentProductDraft.images);
-      window.requestAnimationFrame(() => {
-        if (scrollContainer) {
-          scrollContainer.scrollTop = Math.min(
-            previousScrollTop,
-            scrollContainer.scrollHeight
-          );
-        }
-
-        const nextInputs = imageGrid.querySelectorAll(".image-url-input");
-        const nextInput = nextInputs[Math.min(index, nextInputs.length - 1)];
-        nextInput?.focus({ preventScroll: true });
-      });
-      queueSaveDraft("图片已删除并保存");
-    });
 
     const mainButton = document.createElement("button");
     mainButton.type = "button";
     mainButton.className = "image-main-button";
     mainButton.textContent = index === 0 ? "主图" : "设主图";
     mainButton.disabled = index === 0;
-    mainButton.addEventListener("click", () => {
-      setMainImage(index);
-    });
 
     const imageActions = document.createElement("div");
     imageActions.className = "image-card-actions";
@@ -6661,50 +6866,12 @@ function renderImages(images) {
     imageMeta.append(imagePositionBadge, imageAltPreview, imageUrlPreview);
     imageFields.className = "image-fields";
     imageFieldsSummary.textContent = "编辑信息";
-    urlInput.addEventListener("input", () => {
-      clearValidationResults();
-      markImagesUserEdited();
-      if (!currentProductDraft.images[index]) {
-        currentProductDraft.images[index] = {
-          url: "",
-          position: index + 1,
-          altText: currentProductDraft.title || ""
-        };
-      }
-
-      currentProductDraft.images[index].url = urlInput.value.trim();
-      currentProductDraft.images[index].check = null;
-      renderImageCheckStatus(checkStatus, null);
-      updateImagePreviewSource(
-        preview,
-        currentProductDraft.images[index].url,
-        currentProductDraft.images[index].altText || currentProductDraft.title || "商品图片"
-      );
-      imageUrlPreview.textContent = currentProductDraft.images[index].url || "未填写 URL";
-      imageUrlPreview.title = currentProductDraft.images[index].url || "";
-      updateImageCheckToolbar();
-      queueSaveDraft();
-    });
-    altInput.addEventListener("input", () => {
-      clearValidationResults();
-      markImagesUserEdited();
-      if (!currentProductDraft.images[index]) {
-        currentProductDraft.images[index] = {
-          url: "",
-          position: index + 1,
-          altText: currentProductDraft.title || ""
-        };
-      }
-
-      currentProductDraft.images[index].altText = altInput.value.trim();
-      imageAltPreview.textContent = currentProductDraft.images[index].altText || currentProductDraft.title || "未填写 Alt";
-      queueSaveDraft();
-    });
-
     imageFields.append(imageFieldsSummary, urlInput, altInput);
     item.append(preview, imageMeta, imageActions, imageFields, checkStatus);
-    imageGrid.appendChild(item);
+    fragment.appendChild(item);
   });
+
+  imageGrid.appendChild(fragment);
 
   updateImageSelectionToolbar();
   updateImageCheckToolbar();
@@ -6749,13 +6916,6 @@ function createVariantInput(field, labelText, value, options = {}) {
   input.value = value || "";
   input.placeholder = options.placeholder || "";
   input.dataset.variantField = field;
-  input.addEventListener("input", () => {
-    clearValidationResults();
-    updateDraftFromForm();
-    updateVariantDuplicateToolbar();
-    updateVariantSkuToolbar();
-    queueSaveDraft();
-  });
 
   label.append(span, input);
   return label;
@@ -6813,6 +6973,8 @@ function renderVariants(variants) {
       : "变体列表"
   );
 
+  const fragment = document.createDocumentFragment();
+
   normalizedVariants.forEach((variant, index) => {
     const matchesSearch = variantMatchesSearch(variant, index, variantSearchQuery);
     const item = document.createElement("article");
@@ -6835,10 +6997,6 @@ function renderVariants(variants) {
     selectCheckbox.className = "variant-select-checkbox";
     selectCheckbox.dataset.index = String(index);
     selectCheckbox.setAttribute("aria-label", `选择变体 #${index + 1}`);
-    selectCheckbox.addEventListener("change", () => {
-      item.classList.toggle("is-selected", selectCheckbox.checked);
-      updateVariantSelectionToolbar();
-    });
     title.textContent = getVariantDisplayName(variant, index);
     exportBadge.className = "variant-export-badge";
     exportBadge.dataset.exportExcluded = String(Boolean(variant.excludedFromExport));
@@ -6848,18 +7006,6 @@ function renderVariants(variants) {
     deleteButton.className = "ghost-button variant-delete-button";
     deleteButton.textContent = "删除";
     deleteButton.disabled = normalizedVariants.length <= 1;
-    deleteButton.addEventListener("click", () => {
-      if (normalizedVariants.length <= 1) {
-        return;
-      }
-
-      clearValidationResults();
-      updateDraftFromForm();
-      currentProductDraft.variants.splice(index, 1);
-      currentProductDraft.variants = normalizeVariants(currentProductDraft);
-      renderVariants(currentProductDraft.variants);
-      queueSaveDraft("变体已删除并保存");
-    });
 
     const compactMeta = document.createElement("div");
     const details = document.createElement("details");
@@ -6918,12 +7064,14 @@ function renderVariants(variants) {
 
     header.append(titleWrap, deleteButton);
     item.append(header, compactMeta, details);
-    variantList.appendChild(item);
+    fragment.appendChild(item);
 
     if (matchesSearch) {
       matchedVariantCount += 1;
     }
   });
+
+  variantList.appendChild(fragment);
 
   if (variantSearchQuery) {
     variantCount.textContent = `${matchedVariantCount}/${normalizedVariants.length} 命中`;
@@ -7583,6 +7731,9 @@ addSafeEventListener(selectImageAreaButton, "click", startImageAreaPicker);
 addSafeEventListener(addImageButton, "click", addManualImage);
 addSafeEventListener(addVariantButton, "click", addVariant);
 addSafeEventListener(resetImageModeButton, "click", resetImageCollectionMode);
+addSafeEventListener(variantList, "click", handleVariantListClick);
+addSafeEventListener(variantList, "change", handleVariantListChange);
+addSafeEventListener(variantList, "input", handleVariantListInput);
 addSafeEventListener(variantSelectAllButton, "click", () => {
   const checkboxes = getTargetVariantCheckboxes();
   setVariantSelection(checkboxes.some((checkbox) => !checkbox.checked));
@@ -7605,6 +7756,14 @@ addSafeEventListener(includeSelectedVariantsButton, "click", () => {
 addSafeEventListener(mergeDuplicateVariantsButton, "click", mergeDuplicateVariants);
 addSafeEventListener(fillVariantSkuButton, "click", fillVariantSkus);
 addSafeEventListener(checkVariantsButton, "click", checkVariantFields);
+addSafeEventListener(imageGrid, "click", handleImageGridClick);
+addSafeEventListener(imageGrid, "keydown", handleImageGridKeydown);
+addSafeEventListener(imageGrid, "change", handleImageGridChange);
+addSafeEventListener(imageGrid, "input", handleImageGridInput);
+addSafeEventListener(imageGrid, "dragstart", handleImageDragStart);
+addSafeEventListener(imageGrid, "dragover", handleImageDragOver);
+addSafeEventListener(imageGrid, "drop", handleImageDrop);
+addSafeEventListener(imageGrid, "dragend", handleImageDragEnd);
 addSafeEventListener(imageSelectAllButton, "click", () => {
   const checkboxes = Array.from(imageGrid.querySelectorAll(".image-select-checkbox"));
   setImageSelection(checkboxes.some((checkbox) => !checkbox.checked));
