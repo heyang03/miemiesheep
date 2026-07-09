@@ -4596,6 +4596,10 @@ function renderImageCheckStatus(element, check) {
   element.textContent = getImageCheckLabel(check);
 }
 
+function getFormFieldValue(input) {
+  return String(input?.value || "").trim();
+}
+
 function normalizeImageCheckUrl(url) {
   return String(url || "").trim();
 }
@@ -5559,7 +5563,7 @@ function handleImageGridInput(event) {
     imageAltPreview.textContent = image.altText || currentProductDraft.title || "未填写 Alt";
   }
 
-  queueSaveDraft();
+  queueSaveDraft(undefined, { syncForm: false });
 }
 
 function handleImageDragStart(event) {
@@ -5660,6 +5664,66 @@ function handleVariantListChange(event) {
   updateVariantSelectionToolbar();
 }
 
+function updateVariantCardSummary(item, variant, index) {
+  item.querySelector(".variant-title-control h3").textContent = getVariantDisplayName(
+    variant,
+    index
+  );
+
+  ["sku", "price", "barcode", "compareAtPrice"].forEach((field) => {
+    const content = item.querySelector(
+      `.variant-meta-pill[data-variant-meta-field="${field}"] strong`
+    );
+    const value = variant[field] || "未填写";
+
+    if (content) {
+      content.textContent = value;
+      content.title = value;
+    }
+  });
+}
+
+function updateVariantDraftFromInput(input) {
+  const item = input.closest(".variant-item");
+  const index = Number(item?.dataset.variantIndex);
+  const field = input.dataset.variantField;
+
+  if (!currentProductDraft || !Number.isInteger(index) || index < 0 || !field) {
+    return null;
+  }
+
+  const existingVariants = Array.isArray(currentProductDraft.variants)
+    ? currentProductDraft.variants
+    : [];
+  const sourceVariants = existingVariants.length
+    ? existingVariants
+    : normalizeVariants(currentProductDraft, currentProductDraft.images);
+
+  currentProductDraft.variants = sourceVariants;
+
+  if (!currentProductDraft.variants[index]) {
+    currentProductDraft.variants[index] = normalizeVariant(
+      {},
+      index,
+      {
+        sku: currentProductDraft.sku || "",
+        price: currentProductDraft.price || "",
+        compareAtPrice: currentProductDraft.compareAtPrice || "",
+        variantImageUrl: ""
+      },
+      currentProductDraft.variants.length || 1
+    );
+  }
+
+  currentProductDraft.variants[index] = {
+    ...currentProductDraft.variants[index],
+    [field]: getFormFieldValue(input)
+  };
+  updateVariantCardSummary(item, currentProductDraft.variants[index], index);
+
+  return currentProductDraft.variants[index];
+}
+
 function handleVariantListInput(event) {
   const input = getEventTargetElement(event);
 
@@ -5668,10 +5732,10 @@ function handleVariantListInput(event) {
   }
 
   clearValidationResults();
-  updateDraftFromForm();
-  updateVariantDuplicateToolbar();
-  updateVariantSkuToolbar();
-  queueSaveDraft();
+  updateVariantDraftFromInput(input);
+  updateVariantDuplicateToolbar(currentProductDraft?.variants || []);
+  updateVariantSkuToolbar(currentProductDraft?.variants || []);
+  queueSaveDraft(undefined, { syncForm: false });
 }
 
 function getVariantField(variant, field, fallback = "") {
@@ -6792,19 +6856,7 @@ function updateDraftFromForm() {
     return;
   }
 
-  currentProductDraft.title = productTitleInput.value.trim();
-  currentProductDraft.price = productPriceInput.value.trim();
-  currentProductDraft.compareAtPrice = productCompareAtPriceInput.value.trim();
-  currentProductDraft.sku = productSkuInput.value.trim();
-  currentProductDraft.vendor = productVendorInput.value.trim();
-  currentProductDraft.type = productTypeInput.value.trim();
-  currentProductDraft.tags = productTagsInput.value.trim();
-  currentProductDraft.status = productStatusSelect.value;
-  currentProductDraft.published = productPublishedSelect.value;
-  currentProductDraft.handle = productHandleInput.value.trim();
-  currentProductDraft.description = productDescriptionInput.value.trim();
-  currentProductDraft.seoTitle = currentProductDraft.title;
-  currentProductDraft.seoDescription = currentProductDraft.description.slice(0, 320);
+  syncProductDraftScalarsFromForm();
   currentProductDraft.images = normalizeImages(
     getImagesFromForm(),
     currentProductDraft.title
@@ -6828,7 +6880,7 @@ function updateDraftFromForm() {
   }
 }
 
-function queueSaveDraft(message = "草稿已自动保存") {
+function queueSaveDraft(message = "草稿已自动保存", options = {}) {
   if (!currentProductDraft) {
     return;
   }
@@ -6837,7 +6889,9 @@ function queueSaveDraft(message = "草稿已自动保存") {
   cacheHint.textContent = "正在保存草稿...";
 
   saveTimer = window.setTimeout(async () => {
-    updateDraftFromForm();
+    if (options.syncForm !== false) {
+      updateDraftFromForm();
+    }
     await saveDraft(currentProductDraft);
     cacheHint.textContent = message;
   }, 260);
@@ -7012,12 +7066,15 @@ function createVariantInput(field, labelText, value, options = {}) {
   return label;
 }
 
-function createVariantMetaPill(labelText, value) {
+function createVariantMetaPill(labelText, value, field = "") {
   const pill = document.createElement("div");
   const label = document.createElement("span");
   const content = document.createElement("strong");
 
   pill.className = "variant-meta-pill";
+  if (field) {
+    pill.dataset.variantMetaField = field;
+  }
   label.textContent = labelText;
   content.textContent = value || "未填写";
   content.title = value || "未填写";
@@ -7036,6 +7093,122 @@ function getVariantDisplayName(variant, index) {
     .map(([name, value]) => `${String(name || "Option").trim()}: ${String(value || "").trim()}`);
 
   return values.join(" / ") || `变体 #${index + 1}`;
+}
+
+function syncDefaultVariantFromProductFields() {
+  const variant = currentProductDraft?.variants?.[0];
+
+  if (
+    currentProductDraft?.variants?.length === 1 &&
+    variant?.option1Name === "Default Title" &&
+    variant?.option1Value === "Default Title"
+  ) {
+    variant.sku = currentProductDraft.sku;
+    variant.price = currentProductDraft.price;
+    variant.compareAtPrice = currentProductDraft.compareAtPrice;
+  }
+}
+
+function updateProductDraftScalarField(field, value) {
+  if (!currentProductDraft || !field) {
+    return;
+  }
+
+  currentProductDraft[field] = value;
+
+  if (field === "title") {
+    currentProductDraft.seoTitle = value;
+  }
+
+  if (field === "description") {
+    currentProductDraft.seoDescription = value.slice(0, 320);
+  }
+
+  if (field === "sku" || field === "price" || field === "compareAtPrice") {
+    syncDefaultVariantFromProductFields();
+  }
+}
+
+function getProductDraftFieldForInput(input) {
+  if (input === productTitleInput) {
+    return "title";
+  }
+
+  if (input === productPriceInput) {
+    return "price";
+  }
+
+  if (input === productCompareAtPriceInput) {
+    return "compareAtPrice";
+  }
+
+  if (input === productSkuInput) {
+    return "sku";
+  }
+
+  if (input === productVendorInput) {
+    return "vendor";
+  }
+
+  if (input === productTypeInput) {
+    return "type";
+  }
+
+  if (input === productTagsInput) {
+    return "tags";
+  }
+
+  if (input === productStatusSelect) {
+    return "status";
+  }
+
+  if (input === productPublishedSelect) {
+    return "published";
+  }
+
+  if (input === productHandleInput) {
+    return "handle";
+  }
+
+  if (input === productDescriptionInput) {
+    return "description";
+  }
+
+  return "";
+}
+
+function syncProductDraftScalarsFromForm() {
+  [
+    productTitleInput,
+    productPriceInput,
+    productCompareAtPriceInput,
+    productSkuInput,
+    productVendorInput,
+    productTypeInput,
+    productTagsInput,
+    productStatusSelect,
+    productPublishedSelect,
+    productHandleInput,
+    productDescriptionInput
+  ].forEach((input) => {
+    updateProductDraftScalarField(getProductDraftFieldForInput(input), getFormFieldValue(input));
+  });
+}
+
+function updateProductDraftFromInput(input, options = {}) {
+  if (!currentProductDraft || !input) {
+    return;
+  }
+
+  if (options.generateHandle && productHandleInput) {
+    productHandleInput.value = generateHandle(productTitleInput.value);
+  }
+
+  updateProductDraftScalarField(getProductDraftFieldForInput(input), getFormFieldValue(input));
+
+  if (options.generateHandle) {
+    updateProductDraftScalarField("handle", getFormFieldValue(productHandleInput));
+  }
 }
 
 function renderVariants(variants) {
@@ -7104,10 +7277,10 @@ function renderVariants(variants) {
 
     compactMeta.className = "variant-compact-meta";
     compactMeta.append(
-      createVariantMetaPill("SKU", variant.sku),
-      createVariantMetaPill("价格", variant.price),
-      createVariantMetaPill("Barcode", variant.barcode),
-      createVariantMetaPill("原价/对比价", variant.compareAtPrice)
+      createVariantMetaPill("SKU", variant.sku, "sku"),
+      createVariantMetaPill("价格", variant.price, "price"),
+      createVariantMetaPill("Barcode", variant.barcode, "barcode"),
+      createVariantMetaPill("原价/对比价", variant.compareAtPrice, "compareAtPrice")
     );
 
     details.className = "variant-details";
@@ -7578,7 +7751,6 @@ async function resetImageCollectionMode() {
 
 function bindDraftInputs() {
   [
-    productTitleInput,
     productPriceInput,
     productCompareAtPriceInput,
     productSkuInput,
@@ -7592,13 +7764,13 @@ function bindDraftInputs() {
   ].filter(Boolean).forEach((input) => {
     addSafeEventListener(input, "input", () => {
       clearValidationResults();
-      updateDraftFromForm();
-      queueSaveDraft();
+      updateProductDraftFromInput(input);
+      queueSaveDraft(undefined, { syncForm: false });
     });
     addSafeEventListener(input, "change", () => {
       clearValidationResults();
-      updateDraftFromForm();
-      queueSaveDraft();
+      updateProductDraftFromInput(input);
+      queueSaveDraft(undefined, { syncForm: false });
     });
   });
 
@@ -7607,10 +7779,18 @@ function bindDraftInputs() {
       return;
     }
 
-    productHandleInput.value = generateHandle(productTitleInput.value);
     clearValidationResults();
-    updateDraftFromForm();
-    queueSaveDraft();
+    updateProductDraftFromInput(productTitleInput, { generateHandle: true });
+    queueSaveDraft(undefined, { syncForm: false });
+  });
+  addSafeEventListener(productTitleInput, "change", () => {
+    if (!currentProductDraft) {
+      return;
+    }
+
+    clearValidationResults();
+    updateProductDraftFromInput(productTitleInput, { generateHandle: true });
+    queueSaveDraft(undefined, { syncForm: false });
   });
 
   addSafeEventListener(regenerateHandleButton, "click", () => {
@@ -7620,8 +7800,8 @@ function bindDraftInputs() {
 
     productHandleInput.value = generateHandle(productTitleInput.value);
     clearValidationResults();
-    updateDraftFromForm();
-    queueSaveDraft("Handle 已重新生成并保存");
+    updateProductDraftFromInput(productHandleInput);
+    queueSaveDraft("Handle 已重新生成并保存", { syncForm: false });
   });
 
   addSafeEventListener(clearDraftButton, "click", async () => {
