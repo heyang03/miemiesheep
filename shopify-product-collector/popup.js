@@ -174,6 +174,8 @@ const MAX_DISCOVERY_PAGE_LIMIT = 20;
 const IMAGE_SCROLL_THRESHOLD = 8;
 const BATCH_PREVIEW_HYDRATE_CONCURRENCY = 3;
 const IMAGE_CHECK_TIMEOUT_MS = 10000;
+const IMAGE_CHECK_CONCURRENCY = 5;
+const IMAGE_CHECK_CACHE_LIMIT = 300;
 const MIN_RECOMMENDED_IMAGE_SIDE = 300;
 const SITE_RULE_FIELD_LABELS = {
   title: "标题",
@@ -205,6 +207,8 @@ let isCheckingImages = false;
 let shouldStopBatchCollection = false;
 let draggedImageIndex = null;
 let activePagePicker = null;
+const imageCheckResultCache = new Map();
+const imageCheckPromiseCache = new Map();
 
 function setStatus(message, type = "idle") {
   if (statusText) {
@@ -4592,18 +4596,88 @@ function renderImageCheckStatus(element, check) {
   element.textContent = getImageCheckLabel(check);
 }
 
+function normalizeImageCheckUrl(url) {
+  return String(url || "").trim();
+}
+
+function cloneImageCheck(check) {
+  return check
+    ? {
+        ...check
+      }
+    : null;
+}
+
+function rememberImageCheckResult(url, check) {
+  const normalizedUrl = normalizeImageCheckUrl(url);
+
+  if (!normalizedUrl) {
+    return cloneImageCheck(check);
+  }
+
+  if (!imageCheckResultCache.has(normalizedUrl) && imageCheckResultCache.size >= IMAGE_CHECK_CACHE_LIMIT) {
+    const oldestKey = imageCheckResultCache.keys().next().value;
+    imageCheckResultCache.delete(oldestKey);
+  }
+
+  imageCheckResultCache.set(normalizedUrl, cloneImageCheck(check));
+  return cloneImageCheck(check);
+}
+
+function getCachedImageCheck(url) {
+  return cloneImageCheck(imageCheckResultCache.get(normalizeImageCheckUrl(url)));
+}
+
+async function mapWithConcurrency(items, concurrency, worker) {
+  const results = new Array(items.length);
+  const workerCount = Math.min(
+    Math.max(1, Number(concurrency) || 1),
+    items.length
+  );
+  let nextIndex = 0;
+
+  async function runNext() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await worker(items[index], index);
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, runNext));
+  return results;
+}
+
+function checkImagesWithConcurrency(images) {
+  return mapWithConcurrency(images, IMAGE_CHECK_CONCURRENCY, (image) =>
+    checkImageUrl(image.url)
+  );
+}
+
 function checkImageUrl(url) {
-  const normalizedUrl = String(url || "").trim();
+  const normalizedUrl = normalizeImageCheckUrl(url);
+  const cachedCheck = getCachedImageCheck(normalizedUrl);
+
+  if (cachedCheck) {
+    return Promise.resolve(cachedCheck);
+  }
+
+  if (imageCheckPromiseCache.has(normalizedUrl)) {
+    return imageCheckPromiseCache.get(normalizedUrl).then(cloneImageCheck);
+  }
 
   if (!/^https?:\/\//i.test(normalizedUrl)) {
     return Promise.resolve(
-      createImageCheck("invalid", {
-        message: "非 http/https"
-      })
+      rememberImageCheckResult(
+        normalizedUrl,
+        createImageCheck("invalid", {
+          message: "非 http/https"
+        })
+      )
     );
   }
 
-  return new Promise((resolve) => {
+  const checkPromise = new Promise((resolve) => {
     const probe = new Image();
     const timer = window.setTimeout(() => {
       cleanup();
@@ -4650,7 +4724,14 @@ function checkImageUrl(url) {
     };
     probe.referrerPolicy = "no-referrer";
     probe.src = normalizedUrl;
-  });
+  })
+    .then((check) => rememberImageCheckResult(normalizedUrl, check))
+    .finally(() => {
+      imageCheckPromiseCache.delete(normalizedUrl);
+    });
+
+  imageCheckPromiseCache.set(normalizedUrl, checkPromise);
+  return checkPromise.then(cloneImageCheck);
 }
 
 function getImageCheckStats(images = currentProductDraft?.images || []) {
@@ -4726,17 +4807,27 @@ async function checkCurrentImages(options = {}) {
     check: createImageCheck("checking")
   }));
   renderImages(currentProductDraft.images);
-  setStatus("正在检查图片可用性和尺寸...", "loading");
+  setStatus(`正在检查图片可用性和尺寸（最多 ${IMAGE_CHECK_CONCURRENCY} 张并发）...`, "loading");
 
-  const results = await Promise.all(
-    currentProductDraft.images.map((image) => checkImageUrl(image.url))
-  );
+  let results = [];
+
+  try {
+    results = await checkImagesWithConcurrency(currentProductDraft.images);
+  } catch (error) {
+    setStatus(error.message || "图片检查失败，请稍后重试", "error");
+  } finally {
+    isCheckingImages = false;
+  }
+
+  if (!results.length) {
+    renderImages(currentProductDraft.images);
+    return;
+  }
 
   currentProductDraft.images = currentProductDraft.images.map((image, index) => ({
     ...image,
     check: results[index]
   }));
-  isCheckingImages = false;
   renderImages(currentProductDraft.images);
   clearValidationResults();
   await saveDraft(currentProductDraft);
@@ -4763,7 +4854,7 @@ async function checkProductImages(product) {
     return draft;
   }
 
-  const results = await Promise.all(images.map((image) => checkImageUrl(image.url)));
+  const results = await checkImagesWithConcurrency(images);
 
   return normalizeDraft({
     ...draft,
