@@ -3136,6 +3136,7 @@ h1 {
 
 .primary-action,
 .export-action,
+.reset-action,
 .secondary-button,
 .ghost-button,
 .mini-button,
@@ -3555,6 +3556,7 @@ select {
 
 .primary-action,
 .export-action,
+.reset-action,
 .more-actions summary {
   display: inline-flex;
   height: 38px;
@@ -3565,6 +3567,68 @@ select {
 
 .button-icon {
   flex: 0 0 auto;
+}
+
+.reset-action {
+  min-width: 84px;
+  gap: 6px;
+  border-color: rgb(var(--color-danger-rgb) / 0.22);
+  padding: 0 11px;
+  color: var(--color-danger-strong);
+  background:
+    linear-gradient(180deg, rgb(var(--color-white-rgb) / 0.92), rgb(var(--color-danger-rgb) / 0.055));
+  box-shadow:
+    inset 0 1px 0 rgb(var(--color-white-rgb) / 0.92),
+    0 6px 14px rgb(var(--color-danger-rgb) / 0.08);
+  font-weight: 800;
+}
+
+.reset-action .button-icon {
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  border: 1px solid rgb(var(--color-danger-rgb) / 0.14);
+  border-radius: 7px;
+  color: var(--color-danger-strong);
+  background: rgb(var(--color-danger-rgb) / 0.075);
+}
+
+.reset-action .button-icon svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.reset-action:hover {
+  border-color: rgb(var(--color-danger-rgb) / 0.34);
+  color: var(--color-danger-strong);
+  background:
+    linear-gradient(180deg, rgb(var(--color-white-rgb) / 0.96), rgb(var(--color-danger-rgb) / 0.105));
+  box-shadow:
+    inset 0 1px 0 rgb(var(--color-white-rgb) / 0.96),
+    0 8px 18px rgb(var(--color-danger-rgb) / 0.13);
+}
+
+.reset-action:hover .button-icon {
+  border-color: rgb(var(--color-danger-rgb) / 0.22);
+  color: var(--color-danger-strong);
+  background: rgb(var(--color-white-rgb) / 0.72);
+}
+
+.reset-action:active {
+  transform: translateY(0);
+  box-shadow: inset 0 1px 3px rgb(var(--color-danger-rgb) / 0.12);
+}
+
+.reset-action:disabled:hover {
+  border-color: rgb(var(--color-danger-rgb) / 0.22);
+  background:
+    linear-gradient(180deg, rgb(var(--color-white-rgb) / 0.92), rgb(var(--color-danger-rgb) / 0.055));
+  box-shadow: none;
 }
 
 .summary-grid {
@@ -3763,6 +3827,99 @@ select {
   display: none !important;
 }
 
+.platform-settings-panel {
+  gap: 10px;
+}
+
+.platform-setting-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid rgb(var(--color-accent-rgb) / 0.12);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+  background:
+    linear-gradient(135deg, rgb(var(--color-white-rgb) / 0.86), rgb(var(--color-surface-sky-rgb) / 0.62));
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease,
+    transform var(--duration-fast) ease;
+}
+
+.platform-setting-row:hover {
+  border-color: rgb(var(--color-accent-rgb) / 0.28);
+  box-shadow: 0 10px 24px rgb(var(--color-shadow-rgb) / 0.1);
+  transform: translateY(-1px);
+}
+
+.platform-setting-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.platform-setting-copy strong {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.platform-setting-copy small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.platform-setting-switch {
+  position: relative;
+  width: 42px;
+  min-width: 42px;
+  height: 24px;
+  min-height: 24px;
+  margin: 0;
+  border: 1px solid rgb(var(--color-muted-rgb) / 0.24);
+  border-radius: var(--radius-pill);
+  padding: 0;
+  appearance: none;
+  background: rgb(var(--color-muted-rgb) / 0.2);
+  cursor: pointer;
+  box-shadow: inset 0 1px 2px rgb(var(--color-ink-rgb) / 0.08);
+  transition:
+    border-color var(--duration-fast) ease,
+    background var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease;
+}
+
+.platform-setting-switch::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-white);
+  box-shadow: 0 2px 7px rgb(var(--color-shadow-rgb) / 0.22);
+  content: "";
+  transition: transform var(--duration-fast) ease;
+}
+
+.platform-setting-switch:checked {
+  border-color: rgb(var(--color-accent-rgb) / 0.5);
+  background: linear-gradient(135deg, var(--accent), var(--sky));
+}
+
+.platform-setting-switch:checked::after {
+  transform: translateX(18px);
+}
+
+.platform-setting-switch:focus-visible {
+  outline: 2px solid rgb(var(--color-accent-rgb) / 0.46);
+  outline-offset: 3px;
+  box-shadow: none;
+}
+
 @media (max-width: 520px) {
   .image-lightbox-frame {
     width: min(94vw, 520px);
@@ -3822,12 +3979,19 @@ body {
   border-radius: var(--radius-2xl);
 }
 
-.workspace-content,
-.tab-panel,
-.work-card,
 .variant-panel,
 .image-panel {
   min-height: 0;
+}
+
+.workspace-content {
+  flex: 0 0 auto;
+  min-height: auto;
+}
+
+.tab-panel,
+.work-card {
+  min-height: auto;
 }
 
 .work-card,

@@ -37,16 +37,15 @@
           <span class="button-icon" aria-hidden="true">CSV</span>
           导出 CSV
         </button>
-        <details class="more-actions">
-          <summary>更多</summary>
-          <div class="more-actions-menu">
-            <button type="button" class="secondary-button" id="resetAllButton">重置</button>
-            <label class="collector-toggle">
-              <input id="amazonVariantPaginationInput" type="checkbox" />
-              <span>Amazon 完整翻页</span>
-            </label>
-          </div>
-        </details>
+        <button type="button" class="secondary-button reset-action" id="resetAllButton">
+          <span class="button-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M4.8 9.2A7.5 7.5 0 1 1 6 16.8" />
+              <path d="M4.8 4.8v4.4h4.4" />
+            </svg>
+          </span>
+          重置
+        </button>
       </section>
 
       <section class="summary-grid" aria-label="采集状态摘要">
@@ -546,6 +545,23 @@
                 <p id="pageDomain">尚未识别</p>
               </div>
             </div>
+          </section>
+
+          <section class="platform-settings-panel work-card" aria-label="平台采集设置">
+            <div class="work-card-header">
+              <div>
+                <p class="section-kicker">Collector Settings</p>
+                <h2>平台采集设置</h2>
+                <p class="section-subtitle">仅在对应平台采集时生效，设置会自动保存。</p>
+              </div>
+            </div>
+            <label class="platform-setting-row" for="amazonVariantPaginationInput">
+              <span class="platform-setting-copy">
+                <strong>Amazon 完整翻页</strong>
+                <small>采集变体时继续读取后续选项页；更完整，但耗时会增加。</small>
+              </span>
+              <input id="amazonVariantPaginationInput" class="platform-setting-switch" type="checkbox" role="switch" />
+            </label>
           </section>
 
           <section class="site-rule-panel work-card is-collapsed" aria-label="站点采集规则">
