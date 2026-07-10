@@ -7,23 +7,22 @@
     "pageTitle": "Raw Organic Whey Protein - 12 oz",
     "source": "shopify-api",
     "title": "Raw Organic Whey Protein - 12 oz",
-    "price": "29.99",
+    "price": "36.99",
     "compareAtPrice": "",
     "sku": "1S-YYV3-AE98",
     "vendor": "Raw Organic Whey",
     "handle": "raw-organic-whey-protein-12-oz",
     "descriptionLength": 1156,
-    "imageCount": 4,
+    "imageCount": 2,
     "firstImages": [
       "https://cdn.shopify.com/s/files/1/1188/6076/products/Raw-Organic-Whey-Protein-12oz.jpg?v=1497811074",
-      "https://cdn.shopify.com/s/files/1/1188/6076/files/12oz-Organic-whey--back-of-bag--updated-nutrition_601bbda4-104a-4111-95a9-9104be75737c.jpg?v=1774474683",
-      "https://www.raworganicwhey.com/cdn/shop/files/12oz-Organic-whey--back-of-bag--updated-nutrition_601bbda4-104a-4111-95a9-9104be75737c.jpg?v=1774474683"
+      "https://cdn.shopify.com/s/files/1/1188/6076/files/12oz-Organic-whey--back-of-bag--updated-nutrition_601bbda4-104a-4111-95a9-9104be75737c.jpg?v=1774474683"
     ],
     "validation": {
       "errors": [],
       "warnings": []
     },
-    "consoleErrorCount": 0
+    "consoleErrorCount": 1
   },
   {
     "url": "https://shop.truvani.com/pages/plant-based-protein",
@@ -39,11 +38,11 @@
     "vendor": "",
     "handle": "truvani-plant-based-protein",
     "descriptionLength": 134,
-    "imageCount": 10,
+    "imageCount": 29,
     "firstImages": [
-      "https://shop.truvani.com/cdn/shop/files/TikTok-P20-CHOC.jpg?v=6675067276164425961",
       "https://shop.truvani.com/cdn/shop/files/SCFFB23-Vanilla.png",
-      "https://shop.truvani.com/cdn/shop/files/choc_vanilla_vanilla_chai_model_drink.jpg"
+      "https://shop.truvani.com/cdn/shop/files/PPB-Desktop-Gallery-01.png?v=6983535718533556834",
+      "https://shop.truvani.com/cdn/shop/files/choc_vanilla_vanilla_chai_model_drink.jpg?v=9871442856967346029"
     ],
     "validation": {
       "errors": [],
@@ -64,18 +63,18 @@
     "sku": "BL-GUM-JAR-60-MB",
     "vendor": "Bloomin",
     "handle": "bloomin-shelajit-gummies",
-    "descriptionLength": 94,
-    "imageCount": 10,
+    "descriptionLength": 90,
+    "imageCount": 8,
     "firstImages": [
-      "https://trybloomin.com/cdn/shop/files/bloomin-desire-gummies-8682748.jpg?v=1771137192&width=1920",
       "https://cdn.shopify.com/s/files/1/0939/8075/4222/files/bloomin-desire-gummies-8682748.jpg?v=1771137192",
-      "https://cdn.shopify.com/s/files/1/0939/8075/4222/files/bloomin-desire-gummies-9882952.jpg?v=1771137193"
+      "https://cdn.shopify.com/s/files/1/0939/8075/4222/files/bloomin-desire-gummies-9882952.jpg?v=1771137193",
+      "https://cdn.shopify.com/s/files/1/0939/8075/4222/files/bloomin-desire-gummies-4290072.jpg?v=1771137193"
     ],
     "validation": {
       "errors": [],
       "warnings": []
     },
-    "consoleErrorCount": 2
+    "consoleErrorCount": 4
   },
   {
     "url": "https://www.musclemilk.com/powders/genuine-protein/chocolate/4.94lb",
@@ -91,11 +90,11 @@
     "vendor": "",
     "handle": "genuine-protein-powder-chocolate-4-94-lb-muscle-milk",
     "descriptionLength": 73,
-    "imageCount": 10,
+    "imageCount": 13,
     "firstImages": [
       "https://www.musclemilk.com/images/powders/genuine-chocolate-79oz-1x.webp",
       "https://www.musclemilk.com/images/powders/genuine-chocolate-79oz-1x.png",
-      "https://www.musclemilk.com/images/shakes/thumb/protein-chocolate-14oz-1x.webp"
+      "https://www.musclemilk.com/images/powders/thumb/genuine-chocolate-79oz-1x.webp"
     ],
     "validation": {
       "errors": [],
@@ -113,22 +112,22 @@
     "pageTitle": "The Body Retinol | 0.1% Retinol – Nécessaire",
     "source": "shopify-api",
     "title": "The Body Retinol | 0.1% Retinol",
-    "price": "65.0",
+    "price": "65.00",
     "compareAtPrice": "",
-    "sku": "6850619375729",
+    "sku": "0048-01",
     "vendor": "Nécessaire",
     "handle": "the-body-retinol-0-1-retinol",
-    "descriptionLength": 1156,
-    "imageCount": 10,
+    "descriptionLength": 1299,
+    "imageCount": 6,
     "firstImages": [
-      "https://necessaire.com/cdn/shop/files/01_THEBODYRETINOL_PDP_113c7b7d-896a-476f-badf-853afffafa25.jpg?v=1762202217",
       "https://cdn.shopify.com/s/files/1/0034/8812/0947/files/01_THEBODYRETINOL_PDP_113c7b7d-896a-476f-badf-853afffafa25.jpg?v=1762202217",
-      "https://cdn.shopify.com/s/files/1/0034/8812/0947/files/02_THEBODYRETINOL_PDP_00e9354a-11ee-4a63-aab7-d4d8b4344423.jpg?v=1692475395"
+      "https://cdn.shopify.com/s/files/1/0034/8812/0947/files/02_THEBODYRETINOL_PDP_00e9354a-11ee-4a63-aab7-d4d8b4344423.jpg?v=1692475395",
+      "https://cdn.shopify.com/s/files/1/0034/8812/0947/files/03_THEBODYRETINOL_PDP_de7dd03d-d2c1-4e94-ac98-54e0be5cd220.jpg?v=1692475395"
     ],
     "validation": {
       "errors": [],
       "warnings": []
     },
-    "consoleErrorCount": 0
+    "consoleErrorCount": 13
   }
 ]
