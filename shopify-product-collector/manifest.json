@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "咩咩羊采集1.0",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "采集商品信息并生成 Shopify CSV。",
   "action": {
     "default_title": "咩咩羊采集1.0"

@@ -3712,3 +3712,165 @@ select {
     justify-self: stretch;
   }
 }
+
+/* P4 scroll convergence: keep the side panel on one primary scroll rail. */
+html,
+body {
+  height: 100%;
+}
+
+body {
+  overflow: hidden;
+}
+
+.popup-shell {
+  height: 100vh;
+  height: 100dvh;
+  overflow-x: clip;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scroll-padding-block: 72px 24px;
+  padding-bottom: max(clamp(12px, 2vw, 20px), env(safe-area-inset-bottom));
+}
+
+.status-panel,
+.workspace-tabs {
+  position: static;
+  top: auto;
+}
+
+.action-row {
+  position: sticky;
+  top: 8px;
+  z-index: 30;
+  margin-top: 0;
+  border-radius: 22px;
+}
+
+.workspace-content,
+.tab-panel,
+.work-card,
+.variant-panel,
+.image-panel {
+  min-height: 0;
+}
+
+.work-card,
+.tab-panel,
+.variant-item,
+.image-item {
+  scroll-margin-top: 76px;
+}
+
+.variant-panel.has-scrollable-variants .variant-header {
+  position: static;
+  top: auto;
+  z-index: auto;
+  backdrop-filter: none;
+}
+
+.variant-list,
+.image-grid,
+.variant-panel.has-scrollable-variants .variant-list,
+.image-panel.has-scrollable-images .image-grid {
+  max-height: none !important;
+  overflow: visible !important;
+  overscroll-behavior: auto;
+  scrollbar-gutter: auto;
+}
+
+.variant-panel.has-scrollable-variants .variant-list,
+.image-panel.has-scrollable-images .image-grid {
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.variant-panel.has-many-variants .variant-list,
+.image-panel.has-many-images .image-grid {
+  row-gap: 12px;
+}
+
+.list-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  border: 1px solid rgba(124, 92, 255, 0.12);
+  border-radius: 16px;
+  padding: 7px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.list-pager[hidden] {
+  display: none !important;
+}
+
+.list-pager-summary {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list-pager-bulk-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.list-pager-button {
+  width: auto;
+  min-width: 72px;
+  min-height: 30px;
+  border-radius: 999px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+@media (max-width: 520px) {
+  .list-pager {
+    flex-wrap: wrap;
+  }
+
+  .list-pager-summary {
+    order: -1;
+    flex: 1 0 100%;
+  }
+
+  .list-pager-bulk-actions {
+    flex: 1 1 100%;
+  }
+
+  .list-pager-bulk-actions .list-pager-button {
+    flex: 1 1 0;
+  }
+}
+
+.bottom-action-bar {
+  bottom: max(8px, env(safe-area-inset-bottom));
+}
+
+@media (max-width: 520px) {
+  .popup-shell {
+    scroll-padding-block: 62px 18px;
+  }
+
+  .action-row {
+    top: 6px;
+  }
+
+  .work-card,
+  .tab-panel,
+  .variant-item,
+  .image-item {
+    scroll-margin-top: 66px;
+  }
+}

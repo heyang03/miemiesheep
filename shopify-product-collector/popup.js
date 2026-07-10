@@ -100,6 +100,7 @@ const imageCount = document.getElementById("imageCount");
 const imageSourceInfo = document.getElementById("imageSourceInfo");
 const imageGrid = document.getElementById("imageGrid");
 const imagePanel = imageGrid?.closest(".image-panel");
+const imagePager = document.getElementById("imagePager");
 const cacheHint = document.getElementById("cacheHint");
 const validationPanel = document.getElementById("validationPanel");
 const validationSummary = document.getElementById("validationSummary");
@@ -111,6 +112,7 @@ const resultHeader = resultTitleToggle?.closest(".accordion-header");
 const variantCount = document.getElementById("variantCount");
 const variantList = document.getElementById("variantList");
 const variantPanel = variantList?.closest(".variant-panel");
+const variantPager = document.getElementById("variantPager");
 const variantTitleToggle = document.getElementById("variantTitleToggle");
 const variantToggleButton = document.getElementById("variantToggleButton");
 const variantSelectAllButton = document.getElementById("variantSelectAllButton");
@@ -172,6 +174,8 @@ const DEFAULT_DISCOVERY_PAGE_LIMIT = 5;
 const MIN_DISCOVERY_PAGE_LIMIT = 1;
 const MAX_DISCOVERY_PAGE_LIMIT = 20;
 const IMAGE_SCROLL_THRESHOLD = 8;
+const IMAGE_PAGE_SIZE = 12;
+const VARIANT_PAGE_SIZE = 8;
 const BATCH_PREVIEW_HYDRATE_CONCURRENCY = 3;
 const IMAGE_CHECK_TIMEOUT_MS = 10000;
 const IMAGE_CHECK_CONCURRENCY = 5;
@@ -207,6 +211,10 @@ let isCheckingImages = false;
 let shouldStopBatchCollection = false;
 let draggedImageIndex = null;
 let activePagePicker = null;
+let imagePage = 1;
+let variantPage = 1;
+let selectedImageIndexes = new Set();
+let selectedVariantIndexes = new Set();
 const imageCheckResultCache = new Map();
 const imageCheckPromiseCache = new Map();
 
@@ -233,7 +241,25 @@ const WORKSPACE_TAB_LABELS = {
   validation: "导出校验"
 };
 
-function activateWorkspaceTab(tabName = "product") {
+function scrollPopupWorkspaceToTop() {
+  const shell = getPopupShellElement();
+
+  if (!shell) {
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    const anchor = document.querySelector(".workspace-tabs") || document.querySelector(".workspace-content");
+    const top = Math.max(0, (anchor?.offsetTop || 0) - 10);
+
+    shell.scrollTo({
+      top,
+      behavior: "auto"
+    });
+  });
+}
+
+function activateWorkspaceTab(tabName = "product", options = {}) {
   const normalizedTab = WORKSPACE_TAB_LABELS[tabName] ? tabName : "product";
 
   workspaceTabButtons.forEach((button) => {
@@ -259,6 +285,10 @@ function activateWorkspaceTab(tabName = "product") {
   if (bottomModeLabel) {
     bottomModeLabel.textContent = WORKSPACE_TAB_LABELS[normalizedTab];
   }
+
+  if (options.scrollToTop) {
+    scrollPopupWorkspaceToTop();
+  }
 }
 
 function getPopupShellElement() {
@@ -271,6 +301,163 @@ function getActiveWorkspaceTabName() {
     getPopupShellElement()?.dataset.activeTab ||
     "product"
   );
+}
+
+function getPagedListState(totalItems, pageSize, requestedPage) {
+  const total = Math.max(0, Number(totalItems) || 0);
+  const size = Math.max(1, Number(pageSize) || total || 1);
+  const pageCount = Math.max(1, Math.ceil(total / size));
+  const page = Math.min(Math.max(1, Number(requestedPage) || 1), pageCount);
+  const startIndex = total ? (page - 1) * size : 0;
+  const endIndex = total ? Math.min(total, startIndex + size) : 0;
+
+  return {
+    total,
+    page,
+    pageCount,
+    startIndex,
+    endIndex,
+    hasMultiplePages: pageCount > 1
+  };
+}
+
+function createPagerButton(label, action, disabled) {
+  const button = document.createElement("button");
+
+  button.type = "button";
+  button.className = "ghost-button list-pager-button";
+  button.dataset.pagerAction = action;
+  button.textContent = label;
+  button.disabled = disabled;
+  return button;
+}
+
+function pruneSelectedIndexes(selectionSet, totalItems) {
+  Array.from(selectionSet).forEach((index) => {
+    if (!Number.isInteger(index) || index < 0 || index >= totalItems) {
+      selectionSet.delete(index);
+    }
+  });
+}
+
+function getSelectedIndexes(selectionSet, totalItems) {
+  pruneSelectedIndexes(selectionSet, totalItems);
+  return Array.from(selectionSet).sort((left, right) => left - right);
+}
+
+function setSelectedIndex(selectionSet, index, checked) {
+  if (!Number.isInteger(index) || index < 0) {
+    return;
+  }
+
+  if (checked) {
+    selectionSet.add(index);
+  } else {
+    selectionSet.delete(index);
+  }
+}
+
+function renderListPager(pager, state, itemLabel, options = {}) {
+  if (!pager) {
+    return;
+  }
+
+  clearElement(pager);
+  pager.hidden = !state.hasMultiplePages;
+
+  if (!state.hasMultiplePages) {
+    return;
+  }
+
+  const summary = document.createElement("span");
+
+  summary.className = "list-pager-summary";
+  summary.textContent = `第 ${state.page}/${state.pageCount} 页 · ${state.startIndex + 1}-${state.endIndex} / ${state.total || 0} ${itemLabel}`;
+
+  if (options.selectedCount) {
+    summary.textContent += ` · 已选 ${options.selectedCount}`;
+  }
+
+  pager.append(
+    createPagerButton("上一页", "previous", state.page <= 1),
+    summary,
+    createPagerButton("下一页", "next", state.page >= state.pageCount)
+  );
+
+  if (options.bulkSelectLabel) {
+    const bulkActions = document.createElement("div");
+
+    bulkActions.className = "list-pager-bulk-actions";
+    bulkActions.append(
+      createPagerButton(options.bulkSelectLabel, "select-all", !state.total),
+      createPagerButton(options.clearSelectionLabel || "清空选择", "clear-selection", !options.selectedCount)
+    );
+    pager.append(bulkActions);
+  }
+}
+
+function getStableElementHeight(element) {
+  return Math.max(
+    Number(element?.dataset?.stableMinHeight || 0),
+    Math.ceil(element?.getBoundingClientRect?.().height || 0)
+  );
+}
+
+function lockStableElementHeight(element) {
+  if (!element) {
+    return;
+  }
+
+  const height = getStableElementHeight(element);
+
+  if (!height) {
+    return;
+  }
+
+  element.dataset.stableMinHeight = String(height);
+  element.style.minHeight = `${height}px`;
+}
+
+function resetStableElementHeight(element) {
+  if (!element) {
+    return;
+  }
+
+  delete element.dataset.stableMinHeight;
+  element.style.minHeight = "";
+}
+
+function updateStableElementHeight(element, shouldKeepStableHeight) {
+  if (!element) {
+    return;
+  }
+
+  if (!shouldKeepStableHeight) {
+    resetStableElementHeight(element);
+    return;
+  }
+
+  lockStableElementHeight(element);
+}
+
+function preservePopupScrollPosition(render, stableElements = []) {
+  const shell = getPopupShellElement();
+  const previousScrollTop = shell?.scrollTop || 0;
+  const elements = (Array.isArray(stableElements) ? stableElements : [stableElements]).filter(Boolean);
+
+  elements.forEach(lockStableElementHeight);
+
+  render();
+
+  if (!shell) {
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    const maxScrollTop = Math.max(0, shell.scrollHeight - shell.clientHeight);
+
+    shell.scrollTop = Math.min(previousScrollTop, maxScrollTop);
+  });
 }
 
 function getPopupUiReturnStorageKey(url = currentTabUrl) {
@@ -3349,6 +3536,10 @@ function resetCurrentProductWorkspaceUi() {
   productStatusSelect.value = "active";
   productPublishedSelect.value = "false";
   imageSourceFilter.value = "all";
+  imagePage = 1;
+  variantPage = 1;
+  selectedImageIndexes = new Set();
+  selectedVariantIndexes = new Set();
 
   productPanel.hidden = true;
   sourceBadge.textContent = "未采集";
@@ -3365,6 +3556,7 @@ function resetCurrentProductWorkspaceUi() {
 
   variantCount.textContent = "0/0 导出";
   variantPanel?.classList.remove("has-scrollable-variants");
+  variantPanel?.classList.remove("has-many-variants");
   variantList.tabIndex = -1;
   variantList.setAttribute("aria-label", "变体列表");
 
@@ -3408,6 +3600,10 @@ async function resetAllState() {
 
     currentProductDraft = null;
     currentImagePickerStatus = null;
+    imagePage = 1;
+    variantPage = 1;
+    selectedImageIndexes = new Set();
+    selectedVariantIndexes = new Set();
     batchItems = [];
     selectedBatchItemIds = new Set();
     batchLogs = [];
@@ -4315,6 +4511,13 @@ function imageMatchesSourceFilter(image) {
   return getImageSourceType(image) === filter;
 }
 
+function getVisibleImageIndexes() {
+  return normalizeImages(currentProductDraft?.images || [], currentProductDraft?.title || "")
+    .map((image, index) => ({ image, index }))
+    .filter(({ image }) => imageMatchesSourceFilter(image))
+    .map(({ index }) => index);
+}
+
 function getImagesFromForm() {
   if (!currentProductDraft) {
     return [];
@@ -4890,6 +5093,7 @@ async function filterSmallImages() {
 
   if (removedCount) {
     markImagesUserEdited();
+    selectedImageIndexes = new Set();
   }
 
   renderImages(currentProductDraft.images);
@@ -4942,6 +5146,7 @@ function filterDuplicateImages() {
 
   if (removedCount) {
     markImagesUserEdited();
+    selectedImageIndexes = new Set();
   }
 
   renderImages(currentProductDraft.images);
@@ -5139,7 +5344,7 @@ async function downloadSelectedImages() {
     return;
   }
 
-  const selectedIndexes = getCheckedIndexes(".image-select-checkbox");
+  const selectedIndexes = getSelectedImageIndexes();
 
   if (!selectedIndexes.length) {
     setStatus("请先勾选要下载的图片", "error");
@@ -5197,13 +5402,6 @@ async function downloadSelectedImages() {
   );
 }
 
-function getCheckedIndexes(selector) {
-  return Array.from(document.querySelectorAll(selector))
-    .filter((input) => input.checked)
-    .map((input) => Number(input.dataset.index))
-    .filter((index) => Number.isInteger(index) && index >= 0);
-}
-
 function getTargetVariantCheckboxes() {
   const checkboxes = Array.from(variantList.querySelectorAll(".variant-select-checkbox"));
 
@@ -5217,33 +5415,42 @@ function getTargetVariantCheckboxes() {
 }
 
 function getSelectedVariantIndexes() {
-  return getTargetVariantCheckboxes()
-    .filter((checkbox) => checkbox.checked)
-    .map((checkbox) => Number(checkbox.dataset.index))
-    .filter((index) => Number.isInteger(index) && index >= 0);
+  return getSelectedIndexes(
+    selectedVariantIndexes,
+    normalizeVariants(currentProductDraft || {}).length
+  );
+}
+
+function getSelectedImageIndexes() {
+  return getSelectedIndexes(
+    selectedImageIndexes,
+    normalizeImages(currentProductDraft?.images || [], currentProductDraft?.title || "").length
+  );
 }
 
 function updateVariantSelectionToolbar() {
   const checkboxes = getTargetVariantCheckboxes();
-  const totalVariantCount = variantList.querySelectorAll(".variant-select-checkbox").length;
-  const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
-  const allSelected = checkboxes.length > 0 && selectedCount === checkboxes.length;
-  const selectedItems = checkboxes
-    .filter((checkbox) => checkbox.checked)
-    .map((checkbox) => checkbox.closest(".variant-item"))
-    .filter(Boolean);
-  const hasSelectedExported = selectedItems.some(
-    (item) => item.dataset.exportExcluded !== "true"
+  const totalVariantCount = normalizeVariants(currentProductDraft || {}).length;
+  const variants = normalizeVariants(currentProductDraft || {});
+  const selectedIndexes = getSelectedVariantIndexes();
+  const selectedCount = selectedIndexes.length;
+  const allSelected =
+    checkboxes.length > 0 &&
+    checkboxes.every((checkbox) => selectedVariantIndexes.has(Number(checkbox.dataset.index)));
+  const hasSelectedExported = selectedIndexes.some(
+    (index) => variants[index] && !variants[index].excludedFromExport
   );
-  const hasSelectedExcluded = selectedItems.some(
-    (item) => item.dataset.exportExcluded === "true"
+  const hasSelectedExcluded = selectedIndexes.some(
+    (index) => Boolean(variants[index]?.excludedFromExport)
   );
 
   variantSelectAllButton.textContent = allSelected
-    ? "取消全选"
+    ? "取消本页"
     : getVariantSearchQuery()
-      ? "全选结果"
-      : "全选";
+      ? "全选本页"
+      : variantPager && !variantPager.hidden
+        ? "全选本页"
+        : "全选";
   deleteSelectedVariantsButton.disabled = !selectedCount || totalVariantCount <= 1;
   excludeSelectedVariantsButton.disabled = !selectedCount || !hasSelectedExported;
   includeSelectedVariantsButton.disabled = !selectedCount || !hasSelectedExcluded;
@@ -5252,16 +5459,86 @@ function updateVariantSelectionToolbar() {
 
 function updateImageSelectionToolbar() {
   const checkboxes = Array.from(imageGrid.querySelectorAll(".image-select-checkbox"));
-  const selectedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
-  const allSelected = checkboxes.length > 0 && selectedCount === checkboxes.length;
+  const selectedCount = getSelectedImageIndexes().length;
+  const allSelected =
+    checkboxes.length > 0 &&
+    checkboxes.every((checkbox) => selectedImageIndexes.has(Number(checkbox.dataset.index)));
 
-  imageSelectAllButton.textContent = allSelected ? "取消全选" : "全选";
+  imageSelectAllButton.textContent =
+    allSelected ? "取消本页" : imagePager && !imagePager.hidden ? "全选本页" : "全选";
   downloadSelectedImagesButton.disabled = !selectedCount;
   deleteSelectedImagesButton.disabled = !selectedCount;
 }
 
+function updatePagedListPage(currentPage, action) {
+  return action === "previous" ? currentPage - 1 : currentPage + 1;
+}
+
+function handleVariantPagerClick(event) {
+  const button = closestWithin(event, "[data-pager-action]", variantPager);
+
+  if (!button || button.disabled || !currentProductDraft) {
+    return;
+  }
+
+  updateDraftFromForm();
+
+  if (button.dataset.pagerAction === "select-all") {
+    getVisibleVariantIndexes().forEach((index) => selectedVariantIndexes.add(index));
+    renderVariants(currentProductDraft.variants);
+    updateVariantSelectionToolbar();
+    setStatus(`已跨页选择 ${getSelectedVariantIndexes().length} 个变体`, "success");
+    return;
+  }
+
+  if (button.dataset.pagerAction === "clear-selection") {
+    selectedVariantIndexes = new Set();
+    renderVariants(currentProductDraft.variants);
+    updateVariantSelectionToolbar();
+    setStatus("已清空变体选择", "idle");
+    return;
+  }
+
+  variantPage = updatePagedListPage(variantPage, button.dataset.pagerAction);
+  preservePopupScrollPosition(() => {
+    renderVariants(currentProductDraft.variants);
+  }, variantList);
+}
+
+function handleImagePagerClick(event) {
+  const button = closestWithin(event, "[data-pager-action]", imagePager);
+
+  if (!button || button.disabled) {
+    return;
+  }
+
+  updateDraftFromForm();
+
+  if (button.dataset.pagerAction === "select-all") {
+    getVisibleImageIndexes().forEach((index) => selectedImageIndexes.add(index));
+    renderImages(currentProductDraft?.images || []);
+    updateImageSelectionToolbar();
+    setStatus(`已跨页选择 ${getSelectedImageIndexes().length} 张图片`, "success");
+    return;
+  }
+
+  if (button.dataset.pagerAction === "clear-selection") {
+    selectedImageIndexes = new Set();
+    renderImages(currentProductDraft?.images || []);
+    updateImageSelectionToolbar();
+    setStatus("已清空图片选择", "idle");
+    return;
+  }
+
+  imagePage = updatePagedListPage(imagePage, button.dataset.pagerAction);
+  preservePopupScrollPosition(() => {
+    renderImages(currentProductDraft?.images || []);
+  }, imageGrid);
+}
+
 function setVariantSelection(checked) {
   getTargetVariantCheckboxes().forEach((checkbox) => {
+    setSelectedIndex(selectedVariantIndexes, Number(checkbox.dataset.index), checked);
     checkbox.checked = checked;
     checkbox.closest(".variant-item")?.classList.toggle("is-selected", checked);
   });
@@ -5270,6 +5547,7 @@ function setVariantSelection(checked) {
 
 function setImageSelection(checked) {
   imageGrid.querySelectorAll(".image-select-checkbox").forEach((checkbox) => {
+    setSelectedIndex(selectedImageIndexes, Number(checkbox.dataset.index), checked);
     checkbox.checked = checked;
     checkbox.closest(".image-item")?.classList.toggle("is-selected", checked);
   });
@@ -5303,6 +5581,7 @@ function deleteSelectedVariants() {
     },
     currentProductDraft.images
   );
+  selectedVariantIndexes = new Set();
   renderVariants(currentProductDraft.variants);
   queueSaveDraft("所选变体已删除并保存");
 }
@@ -5341,7 +5620,7 @@ function deleteSelectedImages() {
     return;
   }
 
-  const selectedIndexes = new Set(getCheckedIndexes(".image-select-checkbox"));
+  const selectedIndexes = new Set(getSelectedImageIndexes());
 
   if (!selectedIndexes.size) {
     return;
@@ -5357,6 +5636,7 @@ function deleteSelectedImages() {
     currentProductDraft.images.filter((_, index) => !selectedIndexes.has(index)),
     currentProductDraft.title
   );
+  selectedImageIndexes = new Set();
   renderImages(currentProductDraft.images);
   window.requestAnimationFrame(() => {
     if (scrollContainer) {
@@ -5389,6 +5669,7 @@ function moveImage(fromIndex, toIndex, message = "图片顺序已更新") {
   const [image] = currentProductDraft.images.splice(fromIndex, 1);
   currentProductDraft.images.splice(toIndex, 0, image);
   currentProductDraft.images = normalizeImages(currentProductDraft.images, currentProductDraft.title);
+  selectedImageIndexes = new Set();
   renderImages(currentProductDraft.images);
   queueSaveDraft(message);
 }
@@ -5413,6 +5694,7 @@ function deleteImageAtIndex(index) {
     currentProductDraft.images,
     currentProductDraft.title
   );
+  selectedImageIndexes = new Set();
   renderImages(currentProductDraft.images);
   window.requestAnimationFrame(() => {
     if (scrollContainer) {
@@ -5515,6 +5797,7 @@ function handleImageGridChange(event) {
     return;
   }
 
+  setSelectedIndex(selectedImageIndexes, Number(checkbox.dataset.index), checkbox.checked);
   checkbox.closest(".image-item")?.classList.toggle("is-selected", checkbox.checked);
   updateImageSelectionToolbar();
 }
@@ -5637,6 +5920,7 @@ function deleteVariantAtIndex(index) {
   updateDraftFromForm();
   currentProductDraft.variants.splice(index, 1);
   currentProductDraft.variants = normalizeVariants(currentProductDraft);
+  selectedVariantIndexes = new Set();
   renderVariants(currentProductDraft.variants);
   queueSaveDraft("变体已删除并保存");
 }
@@ -5660,6 +5944,7 @@ function handleVariantListChange(event) {
     return;
   }
 
+  setSelectedIndex(selectedVariantIndexes, Number(checkbox.dataset.index), checkbox.checked);
   checkbox.closest(".variant-item")?.classList.toggle("is-selected", checkbox.checked);
   updateVariantSelectionToolbar();
 }
@@ -5907,37 +6192,57 @@ function applyPreservedImages(product, snapshot) {
 
 function getVariantsFromForm() {
   const items = Array.from(variantList.querySelectorAll(".variant-item"));
+  const variants = normalizeVariants(currentProductDraft || {}, currentProductDraft?.images);
 
   if (!items.length) {
-    return normalizeVariants(currentProductDraft || {});
+    return variants;
   }
 
-  return items.map((item) => ({
-    sku: item.querySelector("[data-variant-field='sku']")?.value.trim() || "",
-    barcode: item.querySelector("[data-variant-field='barcode']")?.value.trim() || "",
-    option1Name:
-      item.querySelector("[data-variant-field='option1Name']")?.value.trim() || "",
-    option1Value:
-      item.querySelector("[data-variant-field='option1Value']")?.value.trim() || "",
-    option2Name:
-      item.querySelector("[data-variant-field='option2Name']")?.value.trim() || "",
-    option2Value:
-      item.querySelector("[data-variant-field='option2Value']")?.value.trim() || "",
-    option3Name:
-      item.querySelector("[data-variant-field='option3Name']")?.value.trim() || "",
-    option3Value:
-      item.querySelector("[data-variant-field='option3Value']")?.value.trim() || "",
-    price: item.querySelector("[data-variant-field='price']")?.value.trim() || "",
-    compareAtPrice:
-      item.querySelector("[data-variant-field='compareAtPrice']")?.value.trim() || "",
-    variantImageUrl:
-      item.querySelector("[data-variant-field='variantImageUrl']")?.value.trim() || "",
-    excludedFromExport: item.dataset.exportExcluded === "true"
-  }));
+  items.forEach((item) => {
+    const index = Number(item.dataset.variantIndex);
+
+    if (!Number.isInteger(index) || index < 0) {
+      return;
+    }
+
+    const currentVariant = variants[index] || {};
+    const getFieldValue = (field) => {
+      const input = item.querySelector(`[data-variant-field='${field}']`);
+
+      return input ? input.value.trim() : currentVariant[field] || "";
+    };
+
+    variants[index] = {
+      ...currentVariant,
+      sku: getFieldValue("sku"),
+      barcode: getFieldValue("barcode"),
+      option1Name: getFieldValue("option1Name"),
+      option1Value: getFieldValue("option1Value"),
+      option2Name: getFieldValue("option2Name"),
+      option2Value: getFieldValue("option2Value"),
+      option3Name: getFieldValue("option3Name"),
+      option3Value: getFieldValue("option3Value"),
+      price: getFieldValue("price"),
+      compareAtPrice: getFieldValue("compareAtPrice"),
+      variantImageUrl: getFieldValue("variantImageUrl"),
+      excludedFromExport: item.dataset.exportExcluded === "true"
+    };
+  });
+
+  return variants;
 }
 
 function getVariantSearchQuery() {
   return variantSearchInput?.value.trim() || "";
+}
+
+function getVisibleVariantIndexes(variants = normalizeVariants(currentProductDraft || {})) {
+  const query = getVariantSearchQuery();
+
+  return variants
+    .map((variant, index) => ({ variant, index }))
+    .filter(({ variant, index }) => variantMatchesSearch(variant, index, query))
+    .map(({ index }) => index);
 }
 
 function getVariantSearchValues(variant, index = 0) {
@@ -6283,6 +6588,7 @@ function mergeDuplicateVariants() {
     .filter((_, index) => !duplicateIndexes.has(index));
 
   clearValidationResults();
+  selectedVariantIndexes = new Set();
   renderVariants(currentProductDraft.variants);
   queueSaveDraft(`已合并 ${stats.duplicateCount} 个重复变体`);
   setStatus(
@@ -6904,18 +7210,27 @@ function renderImages(images) {
   const visibleImages = productImages
     .map((image, index) => ({ image, index }))
     .filter(({ image }) => imageMatchesSourceFilter(image));
-  const shouldLimitImageGridHeight = visibleImages.length > IMAGE_SCROLL_THRESHOLD;
+  const hasManyVisibleImages = visibleImages.length > IMAGE_SCROLL_THRESHOLD;
+  const imagePageState = getPagedListState(visibleImages.length, IMAGE_PAGE_SIZE, imagePage);
+  const pagedImages = visibleImages.slice(imagePageState.startIndex, imagePageState.endIndex);
+
+  imagePage = imagePageState.page;
   imageCount.textContent = `${productImages.length} 张`;
-  imagePanel?.classList.toggle("has-scrollable-images", shouldLimitImageGridHeight);
-  imageGrid.tabIndex = shouldLimitImageGridHeight ? 0 : -1;
+  imagePanel?.classList.remove("has-scrollable-images");
+  imagePanel?.classList.toggle("has-many-images", hasManyVisibleImages);
+  imageGrid.tabIndex = -1;
   imageGrid.setAttribute(
     "aria-label",
-    shouldLimitImageGridHeight
-      ? `商品图片预览，${visibleImages.length} 张，可滚动`
-      : "商品图片预览"
+    hasManyVisibleImages ? `商品图片预览，${visibleImages.length} 张` : "商品图片预览"
   );
+  renderListPager(imagePager, imagePageState, "张", {
+    bulkSelectLabel: imageSourceFilter?.value === "all" ? "全选全部" : "全选筛选",
+    selectedCount: getSelectedIndexes(selectedImageIndexes, productImages.length).length
+  });
+  updateStableElementHeight(imageGrid, imagePageState.hasMultiplePages);
 
   if (!productImages.length) {
+    renderListPager(imagePager, getPagedListState(0, IMAGE_PAGE_SIZE, 1), "张");
     const empty = document.createElement("p");
     empty.className = "empty-state";
     empty.textContent = "未识别到商品图片。";
@@ -6926,6 +7241,7 @@ function renderImages(images) {
   }
 
   if (!visibleImages.length) {
+    renderListPager(imagePager, getPagedListState(0, IMAGE_PAGE_SIZE, 1), "张");
     const empty = document.createElement("p");
     empty.className = "empty-state";
     empty.textContent = "当前筛选条件下没有图片。";
@@ -6937,11 +7253,12 @@ function renderImages(images) {
 
   const fragment = document.createDocumentFragment();
 
-  visibleImages.forEach(({ image, index }) => {
+  pagedImages.forEach(({ image, index }) => {
     const item = document.createElement("figure");
     item.className = "image-item";
     item.dataset.imageIndex = String(index);
     item.draggable = true;
+    item.classList.toggle("is-selected", selectedImageIndexes.has(index));
 
     const preview = document.createElement("div");
     preview.className = "image-preview";
@@ -6956,6 +7273,7 @@ function renderImages(images) {
     selectCheckbox.type = "checkbox";
     selectCheckbox.className = "image-select-checkbox";
     selectCheckbox.dataset.index = String(index);
+    selectCheckbox.checked = selectedImageIndexes.has(index);
     selectCheckbox.setAttribute("aria-label", `选择第 ${image.position} 张图片`);
     selectLabel.append(selectCheckbox);
 
@@ -7039,6 +7357,7 @@ function addManualImage() {
     altText: currentProductDraft.title || ""
   });
 
+  imagePage = Number.POSITIVE_INFINITY;
   renderImages(currentProductDraft.images);
   queueSaveDraft("已添加图片输入框");
 
@@ -7222,25 +7541,43 @@ function renderVariants(variants) {
     (variant) => !variant.excludedFromExport
   ).length;
   const variantSearchQuery = getVariantSearchQuery();
-  let matchedVariantCount = 0;
-  const shouldLimitVariantListHeight = normalizedVariants.length > 4;
+  const hasManyVariants = normalizedVariants.length > 4;
+  const visibleVariants = normalizedVariants
+    .map((variant, index) => ({ variant, index }))
+    .filter(({ variant, index }) =>
+      variantMatchesSearch(variant, index, variantSearchQuery)
+    );
+  const matchedVariantCount = visibleVariants.length;
+  const variantPageState = getPagedListState(
+    visibleVariants.length,
+    VARIANT_PAGE_SIZE,
+    variantPage
+  );
+  const pagedVariants = visibleVariants.slice(
+    variantPageState.startIndex,
+    variantPageState.endIndex
+  );
 
+  variantPage = variantPageState.page;
   variantCount.textContent = variantSearchQuery
     ? `${matchedVariantCount}/${normalizedVariants.length} 命中`
     : `${exportableCount}/${normalizedVariants.length} 导出`;
-  variantPanel?.classList.toggle("has-scrollable-variants", shouldLimitVariantListHeight);
-  variantList.tabIndex = shouldLimitVariantListHeight ? 0 : -1;
+  variantPanel?.classList.remove("has-scrollable-variants");
+  variantPanel?.classList.toggle("has-many-variants", hasManyVariants);
+  variantList.tabIndex = -1;
   variantList.setAttribute(
     "aria-label",
-    shouldLimitVariantListHeight
-      ? `变体列表，${normalizedVariants.length} 个，可滚动`
-      : "变体列表"
+    hasManyVariants ? `变体列表，${normalizedVariants.length} 个` : "变体列表"
   );
+  renderListPager(variantPager, variantPageState, "个", {
+    bulkSelectLabel: variantSearchQuery ? "全选结果" : "全选全部",
+    selectedCount: getSelectedIndexes(selectedVariantIndexes, normalizedVariants.length).length
+  });
+  updateStableElementHeight(variantList, variantPageState.hasMultiplePages);
 
   const fragment = document.createDocumentFragment();
 
-  normalizedVariants.forEach((variant, index) => {
-    const matchesSearch = variantMatchesSearch(variant, index, variantSearchQuery);
+  pagedVariants.forEach(({ variant, index }) => {
     const item = document.createElement("article");
     const header = document.createElement("div");
     const titleWrap = document.createElement("label");
@@ -7251,7 +7588,7 @@ function renderVariants(variants) {
     const fields = document.createElement("div");
 
     item.className = "variant-item";
-    item.classList.toggle("is-search-hidden", !matchesSearch);
+    item.classList.toggle("is-selected", selectedVariantIndexes.has(index));
     item.classList.toggle("is-export-excluded", variant.excludedFromExport);
     item.dataset.variantIndex = String(index);
     item.dataset.exportExcluded = String(Boolean(variant.excludedFromExport));
@@ -7260,6 +7597,7 @@ function renderVariants(variants) {
     selectCheckbox.type = "checkbox";
     selectCheckbox.className = "variant-select-checkbox";
     selectCheckbox.dataset.index = String(index);
+    selectCheckbox.checked = selectedVariantIndexes.has(index);
     selectCheckbox.setAttribute("aria-label", `选择变体 #${index + 1}`);
     title.textContent = getVariantDisplayName(variant, index);
     exportBadge.className = "variant-export-badge";
@@ -7329,10 +7667,6 @@ function renderVariants(variants) {
     header.append(titleWrap, deleteButton);
     item.append(header, compactMeta, details);
     fragment.appendChild(item);
-
-    if (matchesSearch) {
-      matchedVariantCount += 1;
-    }
   });
 
   variantList.appendChild(fragment);
@@ -7342,6 +7676,7 @@ function renderVariants(variants) {
   }
 
   if (variantSearchQuery && !matchedVariantCount) {
+    renderListPager(variantPager, getPagedListState(0, VARIANT_PAGE_SIZE, 1), "个");
     const empty = document.createElement("p");
     empty.className = "empty-state";
     empty.textContent = "没有匹配的变体。";
@@ -7391,6 +7726,7 @@ function addVariant() {
     variantImageUrl: ""
   });
   currentProductDraft.variants = normalizeVariants(currentProductDraft);
+  variantPage = Number.POSITIVE_INFINITY;
   renderVariants(currentProductDraft.variants);
   queueSaveDraft("已添加变体输入框");
 
@@ -7420,6 +7756,10 @@ function renderProduct(product, options = {}) {
 
   sourceBadge.textContent = getSourceLabel(currentProductDraft.source);
   updateSiteTypeBadge(currentProductDraft.source);
+  imagePage = 1;
+  variantPage = 1;
+  selectedImageIndexes = new Set();
+  selectedVariantIndexes = new Set();
   renderVariants(currentProductDraft.variants);
   renderImages(currentProductDraft.images);
   imageSourceInfo.textContent = getImageModeLabel(currentProductDraft);
@@ -7811,6 +8151,10 @@ function bindDraftInputs() {
 
     await chromeStorageRemove(currentDraftKey);
     currentProductDraft = null;
+    imagePage = 1;
+    variantPage = 1;
+    selectedImageIndexes = new Set();
+    selectedVariantIndexes = new Set();
     productPanel.hidden = true;
     updateSiteTypeBadge();
     clearValidationResults();
@@ -7916,12 +8260,12 @@ bindButtonFeedback();
 bindDraftInputs();
 workspaceTabButtons.forEach((button) => {
   addSafeEventListener(button, "click", () => {
-    activateWorkspaceTab(button.dataset.workspaceTab);
+    activateWorkspaceTab(button.dataset.workspaceTab, { scrollToTop: true });
   });
 });
 summaryShortcutButtons.forEach((button) => {
   addSafeEventListener(button, "click", () => {
-    activateWorkspaceTab(button.dataset.tabShortcut);
+    activateWorkspaceTab(button.dataset.tabShortcut, { scrollToTop: true });
   });
 });
 addSafeEventListener(collectButton, "click", collectCurrentProduct);
@@ -8005,6 +8349,7 @@ addSafeEventListener(resetImageModeButton, "click", resetImageCollectionMode);
 addSafeEventListener(variantList, "click", handleVariantListClick);
 addSafeEventListener(variantList, "change", handleVariantListChange);
 addSafeEventListener(variantList, "input", handleVariantListInput);
+addSafeEventListener(variantPager, "click", handleVariantPagerClick);
 addSafeEventListener(variantSelectAllButton, "click", () => {
   const checkboxes = getTargetVariantCheckboxes();
   setVariantSelection(checkboxes.some((checkbox) => !checkbox.checked));
@@ -8015,6 +8360,7 @@ addSafeEventListener(variantSearchInput, "input", () => {
   }
 
   updateDraftFromForm();
+  variantPage = 1;
   renderVariants(currentProductDraft.variants);
 });
 addSafeEventListener(deleteSelectedVariantsButton, "click", deleteSelectedVariants);
@@ -8035,6 +8381,7 @@ addSafeEventListener(imageGrid, "dragstart", handleImageDragStart);
 addSafeEventListener(imageGrid, "dragover", handleImageDragOver);
 addSafeEventListener(imageGrid, "drop", handleImageDrop);
 addSafeEventListener(imageGrid, "dragend", handleImageDragEnd);
+addSafeEventListener(imagePager, "click", handleImagePagerClick);
 addSafeEventListener(imageSelectAllButton, "click", () => {
   const checkboxes = Array.from(imageGrid.querySelectorAll(".image-select-checkbox"));
   setImageSelection(checkboxes.some((checkbox) => !checkbox.checked));
@@ -8046,6 +8393,7 @@ addSafeEventListener(fillImageAltButton, "click", fillImageAltText);
 addSafeEventListener(replaceImageDomainButton, "click", replaceImageDomain);
 addSafeEventListener(downloadSelectedImagesButton, "click", downloadSelectedImages);
 addSafeEventListener(imageSourceFilter, "change", () => {
+  imagePage = 1;
   renderImages(currentProductDraft?.images || []);
 });
 addSafeEventListener(deleteSelectedImagesButton, "click", deleteSelectedImages);
