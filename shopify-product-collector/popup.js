@@ -142,7 +142,6 @@ const imageBody = document.getElementById("imageBody");
 const imageHeader = imageTitleToggle?.closest(".accordion-header");
 const headerDomainBadge = document.getElementById("headerDomainBadge");
 const siteTypeBadge = document.getElementById("siteTypeBadge");
-const workspaceTabButtons = Array.from(document.querySelectorAll("[data-workspace-tab]"));
 const workspaceTabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
 const summaryShortcutButtons = Array.from(document.querySelectorAll("[data-tab-shortcut]"));
 const summaryProductStatus = document.getElementById("summaryProductStatus");
@@ -249,7 +248,7 @@ function scrollPopupWorkspaceToTop() {
   }
 
   window.requestAnimationFrame(() => {
-    const anchor = document.querySelector(".workspace-tabs") || document.querySelector(".workspace-content");
+    const anchor = document.querySelector(".workspace-content");
     const top = Math.max(0, (anchor?.offsetTop || 0) - 10);
 
     shell.scrollTo({
@@ -261,12 +260,6 @@ function scrollPopupWorkspaceToTop() {
 
 function activateWorkspaceTab(tabName = "product", options = {}) {
   const normalizedTab = WORKSPACE_TAB_LABELS[tabName] ? tabName : "product";
-
-  workspaceTabButtons.forEach((button) => {
-    const isActive = button.dataset.workspaceTab === normalizedTab;
-    button.classList.toggle("is-active", isActive);
-    button.setAttribute("aria-selected", String(isActive));
-  });
 
   summaryShortcutButtons.forEach((button) => {
     const isActive = button.dataset.tabShortcut === normalizedTab;
@@ -296,11 +289,7 @@ function getPopupShellElement() {
 }
 
 function getActiveWorkspaceTabName() {
-  return (
-    document.querySelector("[data-workspace-tab].is-active")?.dataset.workspaceTab ||
-    getPopupShellElement()?.dataset.activeTab ||
-    "product"
-  );
+  return getPopupShellElement()?.dataset.activeTab || "product";
 }
 
 function getPagedListState(totalItems, pageSize, requestedPage) {
@@ -8258,11 +8247,6 @@ async function initializePopup() {
 
 bindButtonFeedback();
 bindDraftInputs();
-workspaceTabButtons.forEach((button) => {
-  addSafeEventListener(button, "click", () => {
-    activateWorkspaceTab(button.dataset.workspaceTab, { scrollToTop: true });
-  });
-});
 summaryShortcutButtons.forEach((button) => {
   addSafeEventListener(button, "click", () => {
     activateWorkspaceTab(button.dataset.tabShortcut, { scrollToTop: true });
